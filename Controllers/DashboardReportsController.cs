@@ -240,7 +240,7 @@ namespace staff.Controllers
             var result = new
             {
                 totalManagers,
-                totalStaff,
+               
                 totalDepartments,
 
                 tasks = new
