@@ -1,0 +1,52 @@
+name: Deploy Staff Performance API
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Publish API
+        run: dotnet publish -c Release -o ./publish
+
+      - name: Remove appsettings from upload
+        run: |
+          rm -f ./publish/appsettings.json
+          rm -f ./publish/appsettings.Development.json
+
+      - name: Upload published API to VPS
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          source: "publish/*"
+          target: "/var/www/performanceapi"
+          strip_components: 1
+
+      - name: Restart API
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script: |
+            systemctl restart myapi
+            systemctl status myapi --no-pager
