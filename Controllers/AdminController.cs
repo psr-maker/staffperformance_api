@@ -1126,8 +1126,11 @@ namespace staff.Controllers
         [HttpGet("get-department-leaves")]
         public async Task<IActionResult> GetDepartmentLeaves()
         {
-            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == "UserId")?.Value;
-            var roleClaim = User.Claims.FirstOrDefault(c => c.Type == "Role")?.Value;
+            var userIdClaim = User.Claims
+                .FirstOrDefault(c => c.Type == "UserId")?.Value;
+
+            var roleClaim = User.Claims
+                .FirstOrDefault(c => c.Type == "Role")?.Value;
 
             if (userIdClaim == null || roleClaim == null)
                 return Unauthorized("Invalid token");
@@ -1135,7 +1138,8 @@ namespace staff.Controllers
             if (roleClaim != "2" && roleClaim != "1")
                 return Forbid("Access denied");
 
-            int userId = int.Parse(userIdClaim);
+            if (!int.TryParse(userIdClaim, out int userId))
+                return Unauthorized("Invalid user ID");
 
             var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.UserId == userId);
@@ -1143,19 +1147,77 @@ namespace staff.Controllers
             if (user == null)
                 return NotFound("User not found");
 
-            var result = await _context.LeaveForm
-                .Where(l => _context.Users.Any(u =>
-                    u.UserId == l.SenderId &&
-                    u.Department == user.Department)
-                  &&
-        (l.LeaveType == null ||
-         !l.LeaveType.Trim().ToLower().Equals("holiday")))
+            // =====================================================
+            // GET DEPARTMENT LEAVES
+            // =====================================================
+
+            var leaves = await _context.LeaveForm
+                .Where(l =>
+                    _context.Users.Any(u =>
+                        u.UserId == l.SenderId &&
+                        u.Department == user.Department
+                    )
+                    &&
+                    (
+                        l.LeaveType == null ||
+                        !l.LeaveType.Trim().ToLower().Equals("holiday")
+                    )
+                )
                 .OrderByDescending(l => l.SubmittedDate)
                 .ToListAsync();
 
+            // =====================================================
+            // GET COMPENSATION EXTRA WORK IDs
+            // =====================================================
+
+            var compensationIds = leaves
+                .Where(l => l.CompensationExtraWorkId.HasValue)
+                .Select(l => l.CompensationExtraWorkId!.Value)
+                .Distinct()
+                .ToList();
+
+            var extraWorks = await _context.ExtraWork
+                .Where(e => compensationIds.Contains(e.Id))
+                .ToDictionaryAsync(
+                    e => e.Id,
+                    e => e.WorkedDate
+                );
+
+            // =====================================================
+            // RETURN RESULT
+            // =====================================================
+
+            var result = leaves.Select(l => new
+            {
+                l.Id,
+                l.SenderId,
+                l.ReceiverId,
+                l.Name,
+                l.Designation,
+                l.Reason,
+                l.FromDate,
+                l.ToDate,
+                l.LeaveType,
+                l.TotalDays,
+                l.ContactNumber,
+                l.Status,
+                l.ApprovedDate,
+                l.RejectionReason,
+                l.SubmittedDate,
+                l.ApplicationSource,
+                l.LeaveTyp,
+                l.CompensationExtraWorkId,
+
+                // Compensation worked date
+                CompensationWorkedDate =
+                    l.CompensationExtraWorkId.HasValue &&
+                    extraWorks.ContainsKey(l.CompensationExtraWorkId.Value)
+                        ? extraWorks[l.CompensationExtraWorkId.Value]
+                        : (DateTime?)null
+            });
+
             return Ok(result);
         }
-
 
         [HttpPost("update-leave-status")]
         public async Task<IActionResult> UpdateLeaveStatus(
@@ -2083,8 +2145,6 @@ namespace staff.Controllers
             return Ok(overtimes);
         }
 
-
-
         [Authorize]
         [HttpPost("punch-correction")]
         public async Task<IActionResult> CreatePunchCorrection(
@@ -2242,8 +2302,6 @@ namespace staff.Controllers
                 data = corrections
             });
         }
-
-
 
 
         [Authorize]

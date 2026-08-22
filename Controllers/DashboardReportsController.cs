@@ -769,5 +769,103 @@ namespace staff.Controllers
             }
         }
 
+        [HttpGet("punch-corrections")]
+        public async Task<IActionResult> GetPunchCorrections(int managerId)
+        {
+            try
+            {
+                // Check whether the logged-in user is Accounts Department Manager
+                var manager = await _context.Users
+                    .FirstOrDefaultAsync(u =>
+                        u.UserId == managerId &&
+                        u.Department == "Accounts Department" &&
+                        u.Role == "2");
+
+                if (manager == null)
+                {
+                    return Forbid();
+                }
+
+                // Get ONLY APPROVED punch correction requests
+                var corrections = await (
+                    from correction in _context.PunchCorrection
+                    join user in _context.Users
+                        on correction.UserId equals user.UserId
+
+                    where correction.Status == "Approved"
+
+                    orderby correction.Date descending
+
+                    select new
+                    {
+                        correction.Id,
+                        Name = user.Name,
+                        Department = user.Department,
+                        Date = correction.Date,
+                        CorrectionType = correction.CorrectionType,
+                        PunchTime = correction.PunchTime,
+                        Reason = correction.Reason,
+                        Status = correction.Status,
+                        ApprovedById = correction.ApprovedById
+                    }
+                ).ToListAsync();
+
+                return Ok(corrections);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Error fetching approved punch corrections",
+                    error = ex.Message
+                });
+            }
+        }
+
+
+        [HttpGet("hr-leaves")]
+        public async Task<IActionResult> GetApprovedLeaves()
+        {
+            try
+            {
+                var leaves = await (
+                    from leave in _context.LeaveForm
+                    join user in _context.Users
+                        on leave.SenderId equals user.UserId
+
+                    where leave.Status == "Approved"
+
+                    orderby leave.FromDate descending
+
+                    select new
+                    {
+                        leave.Id,
+                        leave.SenderId,
+                        leave.ReceiverId,
+                        Name = user.Name,
+                        Department = user.Department,      // <-- was missing, needed for grouping/filtering
+                        Designation = leave.Designation,
+                        Reason = leave.Reason,
+                        FromDate = leave.FromDate,
+                        ToDate = leave.ToDate,              // <-- was missing, needed for date-range display
+                        LeaveType = leave.LeaveType,
+                        LeaveTyp=leave.LeaveTyp,
+                        Status = leave.Status,
+                      
+                    }
+                ).ToListAsync();
+
+                return Ok(leaves);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Error while fetching approved leaves.",
+                    error = ex.Message
+                });
+            }
+        }
+
     }
 }
