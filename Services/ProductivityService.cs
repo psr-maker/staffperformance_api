@@ -28,13 +28,22 @@ namespace StaffWork_Track.Services
                 .Distinct()
                 .ToListAsync();
 
+            //var taskScores = await _context.TaskReview
+            //    .Where(r =>
+            //        r.ReviewedAt.Month == month &&
+            //        r.ReviewedAt.Year == year &&
+            //        taskCodes.Contains(r.TaskCode))
+            //    .Select(r => r.FinalPoints)
+            //    .ToListAsync();
+
             var taskScores = await _context.TaskReview
-                .Where(r =>
-                    r.ReviewedAt.Month == month &&
-                    r.ReviewedAt.Year == year &&
-                    taskCodes.Contains(r.TaskCode))
-                .Select(r => r.FinalPoints)
-                .ToListAsync();
+    .Where(r =>
+        r.StaffId == staffId &&
+        r.ReviewedAt.Month == month &&
+        r.ReviewedAt.Year == year &&
+        taskCodes.Contains(r.TaskCode))
+    .Select(r => r.FinalPoints)
+    .ToListAsync();
 
             bool hasTask = taskScores.Any();
 

@@ -667,7 +667,9 @@ namespace staff.Controllers
                 return BadRequest("Task not completed");
 
             var alreadyReviewed = await _context.TaskReview
-                .AnyAsync(r => r.TaskCode == dto.TaskCode);
+     .AnyAsync(r =>
+         r.TaskCode == dto.TaskCode &&
+         r.StaffId == dto.StaffId);
 
             if (alreadyReviewed)
                 return BadRequest("Task already reviewed");
@@ -679,11 +681,11 @@ namespace staff.Controllers
             int finalPoints = systemPoints;
             if (dto.IsDelayJustified && dto.ManagerPoints.HasValue)
             {
-                finalPoints = dto.ManagerPoints.Value; 
+                finalPoints = dto.ManagerPoints.Value;
             }
-          
 
-           
+
+
             if (dto.IsDelayJustified && dto.ManagerPoints.HasValue)
             {
                 finalPoints = dto.ManagerPoints.Value;
@@ -692,12 +694,17 @@ namespace staff.Controllers
             var review = new TaskReview
             {
                 TaskCode = dto.TaskCode,
+                StaffId = dto.StaffId,
+
                 ReviewedById = $"{reviewer.UserId}-{reviewer.Name}",
+
                 SystemPoints = systemPoints,
                 FinalPoints = finalPoints,
+
                 IsDelayJustified = dto.IsDelayJustified,
                 DelayReason = dto.DelayReason,
                 Comment = dto.Comment,
+
                 ReviewedAt = DateTime.Now
             };
 
@@ -705,45 +712,96 @@ namespace staff.Controllers
             await _context.SaveChangesAsync();
 
             if (!string.IsNullOrEmpty(task.GoalCode))
+{
+    var goal = await _context.Goal
+        .FirstOrDefaultAsync(g =>
+            g.GoalCode == task.GoalCode);
+
+    if (goal != null)
+    {
+        var goalTasks = await _context.Tasks
+            .Where(t => t.GoalCode == goal.GoalCode)
+            .ToListAsync();
+
+        var taskCodes = goalTasks
+            .Select(t => t.TaskCode)
+            .ToList();
+
+        var reviews = await _context.TaskReview
+            .Where(r => taskCodes.Contains(r.TaskCode))
+            .ToListAsync();
+
+        bool allTasksReviewed = true;
+
+        // Check every staff member of every task
+        foreach (var goalTask in goalTasks)
+        {
+            var members = await _context.TaskMembers
+                .Where(tm => tm.TaskCode == goalTask.TaskCode)
+                .ToListAsync();
+
+            foreach (var member in members)
             {
-                var goal = await _context.Goal.FirstOrDefaultAsync(g => g.GoalCode == task.GoalCode);
-                if (goal != null)
+                if (string.IsNullOrWhiteSpace(member.Assign_To))
+                    continue;
+
+                var parts = member.Assign_To.Split('-');
+
+                if (!int.TryParse(parts[0], out int staffId))
+                    continue;
+
+                bool reviewed = reviews.Any(r =>
+                    r.TaskCode == goalTask.TaskCode &&
+                    r.StaffId == staffId);
+
+                if (!reviewed)
                 {
-                    var goalTasks = await _context.Tasks
-                        .Where(t => t.GoalCode == goal.GoalCode)
-                        .ToListAsync();
-
-              
-                    bool allCompleted = goalTasks.All(t => t.Status.Trim().ToLower() == "completed");
-
-                    if (allCompleted)
-                    {
-                        var reviews = await _context.TaskReview
-                            .Where(r => goalTasks.Select(t => t.TaskCode.Trim().ToLower())
-                            .Contains(r.TaskCode.Trim().ToLower()))
-                            .ToListAsync();
-
-                        bool allReviewed = goalTasks.All(t =>
-                            reviews.Any(r => r.TaskCode.Trim().ToLower() == t.TaskCode.Trim().ToLower() && r.FinalPoints > 0)
-                        );
-
-                        if (allReviewed)
-                        {
-                            // Calculate goal points
-                            var taskPointsList = goalTasks.Select(t =>
-                                reviews.First(r => r.TaskCode.Trim().ToLower() == t.TaskCode.Trim().ToLower()).FinalPoints
-                            ).ToList();
-
-                            goal.Goalpoints = CalculateGoalPoints(taskPointsList, goal.Priority, goal.DueDate);
-
-                     
-                            await _context.SaveChangesAsync();
-                        }
-                    }
+                    allTasksReviewed = false;
+                    break;
                 }
             }
 
+            if (!allTasksReviewed)
+                break;
+        }
 
+        // Only calculate when every assigned staff member
+        // has a review for every task
+        if (allTasksReviewed)
+        {
+            var taskAveragePoints = new List<int>();
+
+            foreach (var goalTask in goalTasks)
+            {
+                var taskReviews = reviews
+                    .Where(r =>
+                        r.TaskCode == goalTask.TaskCode)
+                    .ToList();
+
+                if (taskReviews.Count == 0)
+                    continue;
+
+                double taskAverage = taskReviews
+                    .Average(r => r.FinalPoints);
+
+                taskAveragePoints.Add(
+                    (int)Math.Round(taskAverage)
+                );
+            }
+
+            if (taskAveragePoints.Count > 0)
+            {
+                goal.Goalpoints = CalculateGoalPoints(
+                    taskAveragePoints,
+                    goal.Priority,
+                    goal.DueDate
+                );
+
+                await _context.SaveChangesAsync();
+            }
+        }
+    }
+}
             if (finalPoints > 0)
             {
                 // ✅ Step 1: Get all members for this task
@@ -827,10 +885,11 @@ namespace staff.Controllers
                 .Where(t => t.Status.ToLower() == "completed")
                 .ToListAsync();
 
-            var taskMembers = await _context.TaskMembers.ToListAsync();
+            var taskMembers = await _context.TaskMembers
+                .ToListAsync();
 
             var reviews = await _context.TaskReview
-                .ToDictionaryAsync(r => r.TaskCode);
+                .ToListAsync();
 
             var result = new List<object>();
 
@@ -840,60 +899,80 @@ namespace staff.Controllers
                     .Where(tm => tm.TaskCode == task.TaskCode)
                     .ToList();
 
-                reviews.TryGetValue(task.TaskCode, out var review);
-
                 foreach (var member in members)
                 {
-                    if (string.IsNullOrEmpty(member.Assign_To) || !member.Assign_To.Contains("-"))
+                    if (string.IsNullOrWhiteSpace(member.Assign_To))
                         continue;
 
-                    var parts = member.Assign_To.Split('-');
-                    if (!int.TryParse(parts[0], out int userId))
+                    var parts = member.Assign_To.Split(
+                        '-',
+                        StringSplitOptions.RemoveEmptyEntries
+                    );
+
+                    if (parts.Length == 0)
                         continue;
 
-                    if (!users.TryGetValue(userId, out var user))
+                    if (!int.TryParse(parts[0].Trim(), out int staffId))
                         continue;
 
-                    int systemPoints = review?.SystemPoints ??
-                        CalculateTaskScore(task.Due_Date, task.Completed_Date, task.Priority);
+                    if (!users.TryGetValue(staffId, out var user))
+                        continue;
+
+                    var review = reviews.FirstOrDefault(r =>
+                        r.TaskCode == task.TaskCode &&
+                        r.StaffId == staffId
+                    );
+
+                    int systemPoints = CalculateTaskScore(
+                        task.Due_Date,
+                        task.Completed_Date,
+                        task.Priority
+                    );
 
                     result.Add(new
                     {
                         taskCode = task.TaskCode,
+
                         task = task.Task,
+
                         description = task.Description,
+
                         priority = task.Priority,
+
                         status = task.Status,
+
                         createdAt = task.Created_At,
+
                         dueDate = task.Due_Date,
+
                         completedDate = task.Completed_Date,
 
-                        employeeId = user.UserId,
-                        employeeName = user.Name,
+                        // ⭐ IMPORTANT FOR FLUTTER
+                        staffId = user.UserId,
+
+                        staffName = user.Name,
+
                         totalMembers = task.Members,
+
                         assignedTo = member.Assign_To,
 
                         systemPoints = systemPoints,
 
+                        // ⭐ THIS IS NOW STAFF-SPECIFIC
                         reviewed = review != null,
+
                         finalPoints = review?.FinalPoints,
-                        isDelayJustified = review?.IsDelayJustified,
+
+                        isDelayJustified = review?.IsDelayJustified ?? false,
+
                         delayReason = review?.DelayReason,
+
                         comment = review?.Comment,
+
                         reviewedAt = review?.ReviewedAt
                     });
                 }
             }
-
-            // ✅ REMOVE DUPLICATES (ONLY FIX ADDED)
-            result = result
-                .GroupBy(x => new
-                {
-                    taskCode = x.GetType().GetProperty("taskCode")?.GetValue(x),
-                    employeeId = x.GetType().GetProperty("employeeId")?.GetValue(x)
-                })
-                .Select(g => g.First())
-                .ToList();
 
             return Ok(result);
         }
@@ -904,30 +983,111 @@ namespace staff.Controllers
         {
             try
             {
-                var review = await _context.TaskReview
+                var reviews = await _context.TaskReview
                     .Where(r => r.TaskCode == taskCode)
-                    .Select(r => new
+                    .ToListAsync();
+
+                if (reviews.Count == 0)
+                {
+                    return Ok(new List<object>());
+                }
+
+                // Get all staff IDs
+                var staffIds = reviews
+                    .Select(r => r.StaffId)
+                    .Distinct()
+                    .ToList();
+
+                // Get all reviewer IDs
+                var reviewerIds = reviews
+                    .Where(r => !string.IsNullOrWhiteSpace(r.ReviewedById))
+                    .Select(r =>
                     {
-                        taskCode = r.TaskCode,
-                        systemPoints = r.SystemPoints,
-                        finalPoints = r.FinalPoints,
-                        isDelayJustified = r.IsDelayJustified,
-                        delayReason = r.DelayReason,
-                        comment = r.Comment,
-                        reviewedAt = r.ReviewedAt,
+                        var parts = r.ReviewedById!.Split('-');
 
-                        reviewedBy = _context.Users
-    .Where(u => u.UserId == Convert.ToInt32(r.ReviewedById))
-    .Select(u => u.Name)
-    .FirstOrDefault()
+                        if (parts.Length > 0 &&
+                            int.TryParse(parts[0], out int id))
+                        {
+                            return (int?)id;
+                        }
+
+                        return null;
                     })
-                    .FirstOrDefaultAsync();
+                    .Where(id => id.HasValue)
+                    .Select(id => id!.Value)
+                    .Distinct()
+                    .ToList();
 
-                return Ok(review);
+                var userIds = staffIds
+                    .Concat(reviewerIds)
+                    .Distinct()
+                    .ToList();
+
+                var users = await _context.Users
+                    .Where(u => userIds.Contains(u.UserId))
+                    .ToDictionaryAsync(u => u.UserId, u => u.Name);
+
+                var result = reviews.Select(review =>
+                {
+                    // Staff name
+                    string staffName = "Unknown Staff";
+
+                    if (users.TryGetValue(review.StaffId, out var name))
+                    {
+                        staffName = name;
+                    }
+
+                    // Reviewer name
+                    string reviewedByName = "";
+
+                    if (!string.IsNullOrWhiteSpace(review.ReviewedById))
+                    {
+                        var parts = review.ReviewedById.Split('-');
+
+                        if (parts.Length > 0 &&
+                            int.TryParse(parts[0], out int reviewerId))
+                        {
+                            if (users.TryGetValue(reviewerId, out var reviewerName))
+                            {
+                                reviewedByName = reviewerName;
+                            }
+                        }
+                    }
+
+                    return new
+                    {
+                        taskCode = review.TaskCode,
+
+                        staffId = review.StaffId,
+                        staffName = staffName,
+
+                        systemPoints = review.SystemPoints,
+                        finalPoints = review.FinalPoints,
+
+                        isDelayJustified = review.IsDelayJustified,
+
+                        delayReason = review.DelayReason,
+
+                        comment = review.Comment,
+
+                        reviewedBy = reviewedByName,
+
+                        reviewedAt = review.ReviewedAt
+                    };
+                }).ToList();
+
+                return Ok(result);
             }
             catch (Exception ex)
             {
-                return StatusCode(500, ex.Message);
+                return StatusCode(
+                    500,
+                    new
+                    {
+                        message = "Failed to get task reviews",
+                        error = ex.Message
+                    }
+                );
             }
         }
 
@@ -1648,12 +1808,9 @@ namespace staff.Controllers
                 if (manager == null)
                     return BadRequest("Manager not found");
 
-                // =====================================================
-                // 8. IF LIMIT EXCEEDED → CREATE LEAVE
-                // =====================================================
-
                 if (totalAfterRequest > monthlyLimit)
                 {
+                    
                     var leave = new LeaveForm
                     {
                         SenderId = senderId,
@@ -1667,6 +1824,8 @@ namespace staff.Controllers
                         ToDate = model.Date,
 
                         LeaveType = "Full Day",
+                        LeaveTyp = "LOP",
+                        ApplicationSource = "PermissionExceeded",
                         TotalDays = 1,
 
                         Status = "Pending",
@@ -1675,13 +1834,8 @@ namespace staff.Controllers
                         ApprovedDate = null,
                         RejectionReason = null,
 
-                        ContactNumber = null,
-
-                        // If you add this field
-                        ApplicationSource = "PermissionExceeded",
-                      
+                        ContactNumber = null
                     };
-
                     _context.LeaveForm.Add(leave);
 
                     await _context.SaveChangesAsync();
@@ -1789,7 +1943,18 @@ namespace staff.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, ex.Message);
+                Console.WriteLine("=================================");
+                Console.WriteLine("APPLY PERMISSION ERROR");
+                Console.WriteLine(ex.ToString());
+                Console.WriteLine("INNER EXCEPTION:");
+                Console.WriteLine(ex.InnerException?.ToString());
+                Console.WriteLine("=================================");
+
+                return StatusCode(500, new
+                {
+                    message = ex.Message,
+                    innerException = ex.InnerException?.Message
+                });
             }
         }
 
@@ -2569,33 +2734,45 @@ namespace staff.Controllers
             return Math.Clamp(finalScore, 0, 100);
         }
 
-        private int CalculateGoalPoints(List<int> taskPointsList, string goalPriority, DateTime? dueDate)
-            {
-            if (taskPointsList == null || taskPointsList.Count == 0)
+       
+        private int CalculateGoalPoints(
+    List<int> taskAveragePoints,
+    string goalPriority,
+    DateTime? dueDate)
+        {
+            if (taskAveragePoints == null ||
+                taskAveragePoints.Count == 0)
                 return 0;
-            double goalPoints = taskPointsList.Average();
 
-                switch (goalPriority?.ToLower())
-                {
-                    case "high":
-                        goalPoints += 5;
-                        break;
-                    case "medium":
-                        goalPoints += 3;
-                        break;
-                }
+            // Average of TASK scores
+            double goalPoints = taskAveragePoints.Average();
 
-                if (dueDate.HasValue)
-                {
-                    if (DateTime.Now <= dueDate.Value)
-                        goalPoints += 5;
-                    else
-                        goalPoints -= 5;
-                }
+            // Priority bonus
+            switch (goalPriority?.Trim().ToLower())
+            {
+                case "high":
+                    goalPoints += 5;
+                    break;
 
-                return (int)Math.Clamp(goalPoints, 0, 100);
+                case "medium":
+                    goalPoints += 3;
+                    break;
             }
 
+            // Due date bonus
+            if (dueDate.HasValue)
+            {
+                if (DateTime.Now.Date <= dueDate.Value.Date)
+                    goalPoints += 5;
+                else
+                    goalPoints -= 5;
+            }
 
+            return (int)Math.Clamp(
+                Math.Round(goalPoints),
+                0,
+                100
+            );
+        }
     }
 }

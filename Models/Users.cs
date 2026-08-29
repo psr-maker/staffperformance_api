@@ -74,7 +74,7 @@ namespace staff
 
         [MaxLength(10)]
         public string TaskCode { get; set; }
-        public string GoalCode { get; set; }
+        public string? GoalCode { get; set; }
         public string Task { get; set; }
         public string Description { get; set; }
         public string Priority { get; set; }
@@ -134,6 +134,8 @@ namespace staff
 
         [Required]
         public string? TaskCode { get; set; }
+        [Required]
+        public int StaffId { get; set; }
 
         [Required]
         public string? ReviewedById { get; set; }
@@ -535,7 +537,7 @@ namespace staff
         public string Task { get; set; }
         public string Description { get; set; }
         public string Priority { get; set; }
-        public string GoalCode { get; set; }
+        public string? GoalCode { get; set; }
         public DateTime Start_date { get; set; }
         public DateTime Due_Date { get; set; }
         public List<int> AssignedToIds { get; set; } = new();
@@ -581,7 +583,7 @@ namespace staff
     public class ReviewTaskDto
     {
         public string TaskCode { get; set; }
-
+        public int StaffId { get; set; }
         public bool IsDelayJustified { get; set; }
 
         public int? ManagerPoints { get; set; }

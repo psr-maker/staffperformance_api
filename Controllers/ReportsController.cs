@@ -723,26 +723,35 @@ namespace staff.Controllers
                     .ToList();
 
 
-                // No productivity data
-                if (!completedMonthData.Any())
+                //// No productivity data
+                //if (!completedMonthData.Any())
+                //{
+                //    return Ok(new
+                //    {
+                //        employeeId,
+                //        year,
+                //        yearlyProductivity = 0
+                //    });
+                //}
+
+                double yearlyProductivity = 0;
+
+                if (completedMonthData.Any())
                 {
-                    return Ok(new
-                    {
-                        employeeId,
-                        year,
-                        yearlyProductivity = 0
-                    });
+                    yearlyProductivity = completedMonthData
+                        .Average(x => (double)x.TotalScore);
+
+                    yearlyProductivity = Math.Round(yearlyProductivity, 2);
                 }
 
+                //// Average of actual monthly scores
+                //double yearlyProductivity =
+                //    completedMonthData.Average(x => (double)x.TotalScore);
 
-                // Average of actual monthly scores
-                double yearlyProductivity =
-                    completedMonthData.Average(x => (double)x.TotalScore);
 
-
-                // Optional: round to 2 decimal places
-                yearlyProductivity =
-                    Math.Round(yearlyProductivity, 2);
+                //// Optional: round to 2 decimal places
+                //yearlyProductivity =
+                //    Math.Round(yearlyProductivity, 2);
 
                 //-----------------------Overdue Goal and Task------------------
 

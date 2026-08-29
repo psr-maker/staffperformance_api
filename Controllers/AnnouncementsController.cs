@@ -135,16 +135,23 @@ namespace staff.Controllers
             });
         }
 
-       
+
         [Authorize]
         [HttpGet("GetAnouncements")]
         public async Task<IActionResult> GetAllAnnouncements()
         {
             var role = User.FindFirst("Role")?.Value;
-            var userId = User.FindFirst("UserId")?.Value; // keep as string
+            var userId = User.FindFirst("UserId")?.Value;
+
+            if (string.IsNullOrEmpty(role))
+            {
+                return Unauthorized("Role not found.");
+            }
 
             var query = _context.Announcements.AsQueryable();
 
+            // Director = Role 1
+            // Director can see every announcement
             if (role != "1")
             {
                 query = query.Where(a =>

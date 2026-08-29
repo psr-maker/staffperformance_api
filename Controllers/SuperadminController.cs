@@ -31,14 +31,14 @@ namespace staff_work_tracking.Controllers
             var users = await _context.Users
                 .Select(u => new
                 {
-                     u.UserId,
+                    u.UserId,
                     u.Name,
                     u.Email,
-                   u.Department,
-                   u.Role,
-                   u.Status,
-                   u.Created_by,
-                   u.wasEdited
+                    u.Department,
+                    u.Role,
+                    u.Status,
+                    u.Created_by,
+                    u.wasEdited
                 })
                 .ToListAsync();
 
@@ -80,7 +80,7 @@ namespace staff_work_tracking.Controllers
         public async Task<IActionResult> GetAllEmployees()
         {
             var employees = await _context.Users
-                .Where(u => u.Role == "Staff")
+                //.Where(u => u.Role == "Staff")
                 .Select(u => new
                 {
                     u.UserId,
@@ -868,9 +868,7 @@ namespace staff_work_tracking.Controllers
 
       [Authorize]
       [HttpPut("update-usersstatus/{userid}")]
-    public async Task<IActionResult> UpdateAdminStatus(
-    int userid,
-    [FromBody] StatusUpdateDto dto)
+    public async Task<IActionResult> UpdateAdminStatus(int userid,[FromBody] StatusUpdateDto dto)
     {
         var user = await _context.Users.FindAsync(userid);
         if (user == null)
@@ -1446,7 +1444,8 @@ namespace staff_work_tracking.Controllers
             if (currentUser == null)
                 return Unauthorized();
 
-            // Base query
+            // ================= BASE QUERY =================
+
             var query =
                 from audit in _context.Auditlog
 
@@ -1460,17 +1459,25 @@ namespace staff_work_tracking.Controllers
                     into taskJoin
                 from taskData in taskJoin.DefaultIfEmpty()
 
+                    // JOIN ROLE TABLE
+                join roleData in _context.Roles
+                    on audit.EditedRole equals roleData.Id.ToString()
+                    into roleJoin
+                from editorRole in roleJoin.DefaultIfEmpty()
+
                 select new
                 {
                     audit,
                     editor,
-                    taskData
+                    taskData,
+                    editorRole
                 };
 
             // ================= ROLE FILTER =================
+
             if (role != "1")
             {
-                // Manager → filter by department AND staff role only
+                // Manager → filter by department
                 query = query.Where(x =>
                     x.editor != null &&
                     x.editor.Department == currentUser.Department
@@ -1478,28 +1485,50 @@ namespace staff_work_tracking.Controllers
             }
 
             // ================= FINAL SELECT =================
+
             var auditLogs = await query
                 .OrderByDescending(x => x.audit.ChangeDateandTime)
                 .Select(x => new
                 {
                     auditId = x.audit.Id,
+
                     entityType = x.audit.EntityType,
+
                     entityId = x.audit.EntityId,
+
                     action = x.audit.Action,
+
                     fieldChanged = x.audit.Fieldchanged,
+
                     oldValue = x.audit.Oldvalue,
+
                     newValue = x.audit.Newvalue,
+
                     editedById = x.audit.EditedUid,
-                    editedByName = x.editor != null ? x.editor.Name : "System",
-                    editedRole = x.audit.EditedRole,
-                    taskCode = x.taskData != null ? x.taskData.TaskCode : null,
-                    taskName = x.taskData != null ? x.taskData.Task : null,
+
+                    editedByName = x.editor != null
+                        ? x.editor.Name
+                        : "System",
+
+                    // RETURN ROLE NAME
+                    editedRole = x.editorRole != null
+                        ? x.editorRole.RoleName
+                        : "System",
+
+                    taskCode = x.taskData != null
+                        ? x.taskData.TaskCode
+                        : null,
+
+                    taskName = x.taskData != null
+                        ? x.taskData.Task
+                        : null,
+
                     changeDateTime = x.audit.ChangeDateandTime
                 })
                 .ToListAsync();
+
             return Ok(auditLogs);
         }
-
 
         [HttpGet("getdepartments")]
         public async Task<IActionResult> GetDepartments()
