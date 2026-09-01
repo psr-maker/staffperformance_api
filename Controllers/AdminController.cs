@@ -1,10 +1,13 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using FirebaseAdmin.Messaging;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using staff.Services;
 using staff_work_tracking.Data;
 using StaffWork_Track.Services;
+using System.Net.NetworkInformation;
 using System.Security.Claims;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
@@ -1450,18 +1453,57 @@ namespace staff.Controllers
 
                 //_context.Notifications.Add(new Notification
                 //{
-                   
+
                 //    Title = "Leave Status",
                 //    Message = message,
                 //    SenderId = leave.ReceiverId, // manager
                 //    ReceiverId = (long)receiverId, // employee
-                   
+
                 //    RelatedId = leave.Id.ToString(),
                 //    IsRead = false,
-                   
+
                 //});
 
-               // await _context.SaveChangesAsync();
+                // await _context.SaveChangesAsync();
+                var employee = await _context.Users
+            .FirstOrDefaultAsync(u => u.UserId == leave.SenderId);
+
+                if (employee != null &&
+                    !string.IsNullOrWhiteSpace(employee.FcmToken))
+                {
+                    try
+                    {
+                       
+
+                        string title = status == "Approved"
+                            ? "Leave Approved"
+                            : "Leave Rejected";
+
+                        string messagee = status == "Approved"
+                            ? $"Your leave request has been approved by {managerName}"
+                            : $"Your leave request has been rejected by {managerName}";
+
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            employee.FcmToken,
+                            title,
+                            message
+                        );
+
+                        Console.WriteLine(
+                            $"Leave status notification sent to employee {employee.UserId}"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM Error: {ex}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine(
+                        $"Employee {leave.SenderId} does not have an FCM token."
+                    );
+                }
 
                 return Ok(new { message = "Updated successfully", data = leave });
             }
@@ -1568,6 +1610,53 @@ namespace staff.Controllers
 
             await _context.SaveChangesAsync();
 
+            var employee = await _context.Users
+    .FirstOrDefaultAsync(u => u.UserId == userId);
+
+            var manager = await (
+           from u in _context.Users
+           join r in _context.Roles
+               on u.Role equals r.Id.ToString()
+           where u.Department == employee.Department
+                 && r.RoleName == "2"
+                 && r.Status == true
+           select u
+       ).FirstOrDefaultAsync();
+
+            if (manager == null)
+            {
+                Console.WriteLine(
+                    $"Manager not found for department: {employee.Department}");
+            }
+            else
+            {
+                // =====================================================
+                // SEND NOTIFICATION TO MANAGER
+                // =====================================================
+
+                if (!string.IsNullOrWhiteSpace(manager.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            manager.FcmToken,
+                            "Compensation Request",
+                            $"You received a compensation request from {employee.Name}"
+                        );
+
+                     
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM Error: {ex}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine(
+                        $"Manager {manager.UserId} does not have an FCM token.");
+                }
+            }
             return Ok(new
             {
                 message = "Extra work application submitted successfully.",
@@ -1697,7 +1786,7 @@ namespace staff.Controllers
 
             if (manager == null)
                 return NotFound("Manager not found");
-
+            string managerName = manager?.Name ?? "Manager";
             // Get extra work
             var extraWork = await _context.ExtraWork
                 .FirstOrDefaultAsync(e => e.Id == id);
@@ -1728,6 +1817,41 @@ namespace staff.Controllers
             extraWork.ApprovedBy = managerId;
 
             await _context.SaveChangesAsync();
+
+
+            if (employee != null &&
+                !string.IsNullOrWhiteSpace(employee.FcmToken))
+            {
+                try
+                {
+
+
+                    if (manager != null)
+                        managerName = manager.Name ?? "Manager";
+
+                    string title = extraWork.Status == "Approved"
+                        ? "Leave Approved"
+                        : "Leave Rejected";
+
+                    string message = extraWork.Status == "Approved"
+                        ? $"Your leave request has been approved by {managerName}"
+                        : $"Your leave request has been rejected by {managerName}";
+
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        employee.FcmToken,
+                        title,
+                        message
+                    );
+
+                    Console.WriteLine(
+                        $"Leave status notification sent to employee {employee.UserId}"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FCM Error: {ex}");
+                }
+            }
 
             return Ok(new
             {
@@ -1876,7 +2000,7 @@ namespace staff.Controllers
                             await _firebaseNotificationService.SendNotificationAsync(
                                 manager.FcmToken,
                                 "Permission Request",
-                                $"You received a Permission request from {model.Name}"
+                                $"You received a permission limit exceeded Leave request from {model.Name}"
                             );
                         }
                         catch (Exception ex)
@@ -2103,17 +2227,53 @@ namespace staff.Controllers
                     ? $"Your permission request has been approved by {managerName}"
                     : $"Your permission request has been rejected by {managerName}";
 
+                var employee = await _context.Users
+         .FirstOrDefaultAsync(u => u.UserId == permission.SenderId);
+
+                if (employee != null &&
+                    !string.IsNullOrWhiteSpace(employee.FcmToken))
+                {
+                    try
+                    {
+
+
+                        if (manager != null)
+                            managerName = manager.Name ?? "Manager";
+
+                        string title = status == "Approved"
+                            ? "Permission Approved"
+                            : "Permission Rejected";
+
+                      
+
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            employee.FcmToken,
+                            title,
+                            message
+                        );
+
+                        Console.WriteLine(
+                            $"Permission status notification sent to employee {employee.UserId}"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM Error: {ex}");
+                    }
+                }
+              
+
                 //_context.Notifications.Add(new Notification
                 //{
-                    
+
                 //    Title = "Permission Status",
                 //    Message = message,
                 //    SenderId = permission.ReceiverId,
                 //    ReceiverId = permission.SenderId,
-                   
+
                 //    RelatedId = permission.Id.ToString(),
                 //    IsRead = false,
-                  
+
                 //});
 
                 //await _context.SaveChangesAsync();
@@ -2178,7 +2338,11 @@ namespace staff.Controllers
         {
             var fromTime = TimeSpan.Parse(dto.FromTime);
             var toTime = TimeSpan.Parse(dto.ToTime);
+            var employee = await _context.Users
+      .FirstOrDefaultAsync(u => u.UserId == dto.Uid);
 
+            if (employee == null)
+                return NotFound("User not found");
             var totalHours = decimal.Round((decimal)(toTime - fromTime).TotalHours,2);
 
             var overtime = new OverTime
@@ -2197,6 +2361,46 @@ namespace staff.Controllers
 
             _context.OverTime.Add(overtime);
             await _context.SaveChangesAsync();
+            var manager = await (
+       from u in _context.Users
+       join r in _context.Roles
+           on u.Role equals r.Id.ToString()
+       where u.Department == employee.Department
+             && r.RoleName == "2"
+             && r.Status == true
+       select u
+   ).FirstOrDefaultAsync();
+
+            // =====================================================
+            // SEND NOTIFICATION TO MANAGER
+            // =====================================================
+
+            if (manager != null &&
+                !string.IsNullOrWhiteSpace(manager.FcmToken))
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        manager.FcmToken,
+                        "Overtime Request",
+                        $"You received an overtime request from {employee.Name}"
+                    );
+
+                    Console.WriteLine(
+                        $"Overtime notification sent to manager {manager.UserId}"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FCM Error: {ex}");
+                }
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"Manager not found or FCM token is empty for department {employee.Department}"
+                );
+            }
 
             return Ok(new
             {
@@ -2234,6 +2438,44 @@ namespace staff.Controllers
 
             await _context.SaveChangesAsync();
 
+            var manager = await (
+      from u in _context.Users
+      join r in _context.Roles
+          on u.Role equals r.Id.ToString()
+      where u.Department == currentUser.Department
+            && r.RoleName == "2"
+            && r.Status == true
+      select u
+  ).FirstOrDefaultAsync();
+
+            if (currentUser != null &&
+                !string.IsNullOrWhiteSpace(currentUser.FcmToken))
+            {
+                try
+                {
+
+                    string title = overtime.isApprov == true
+                        ? "Overtime Approved"
+                        : "Overtime Rejected";
+
+                    string message = overtime.isApprov == true
+                        ? $"Your overtime request has been approved by Manager"
+                        : $"Your overtime request has been rejected by Manager";
+
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        currentUser.FcmToken,
+                        title,
+                        message
+                    );
+
+                 
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FCM Error: {ex}");
+                }
+            }
+          
             return Ok(new
             {
                 Message = dto.IsApproved
@@ -2401,6 +2643,47 @@ namespace staff.Controllers
 
             await _context.SaveChangesAsync();
 
+            var manager = await (
+      from u in _context.Users
+      join r in _context.Roles
+          on u.Role equals r.Id.ToString()
+      where u.Department == user.Department
+            && r.RoleName == "2"
+            && r.Status == true
+      select u
+  ).FirstOrDefaultAsync();
+
+            // =====================================================
+            // SEND NOTIFICATION TO MANAGER
+            // =====================================================
+
+            if (manager != null &&
+                !string.IsNullOrWhiteSpace(manager.FcmToken))
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        manager.FcmToken,
+                        "Punch Correction Request",
+                        $"You received a punch correction request from {user.Name}"
+                    );
+
+                    Console.WriteLine(
+                        $"Punch correction notification sent to manager {manager.UserId}"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FCM Error: {ex}");
+                }
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"Manager not found or FCM token is empty for department {user.Department}"
+                );
+            }
+
             return Ok(new
             {
                 message = "Punch correction request submitted successfully",
@@ -2438,6 +2721,39 @@ namespace staff.Controllers
 
             await _context.SaveChangesAsync();
 
+            var employee = await _context.Users
+.FirstOrDefaultAsync(u => u.UserId == correction.UserId);
+
+            if (employee != null &&
+                !string.IsNullOrWhiteSpace(employee.FcmToken))
+            {
+                try
+                {
+
+                    string title = correction.Status == "Approved"
+                        ? "Leave Approved"
+                        : "Leave Rejected";
+
+                    string message = correction.Status == "Approved"
+                        ? $"Your leave request has been approved by Manager"
+                        : $"Your leave request has been rejected by Manager";
+
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        employee.FcmToken,
+                        title,
+                        message
+                    );
+
+                    Console.WriteLine(
+                        $"Leave status notification sent to employee {employee.UserId}"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FCM Error: {ex}");
+                }
+            }
+          
             return Ok(new
             {
                 message = dto.Approved
