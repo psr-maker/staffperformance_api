@@ -834,22 +834,22 @@ namespace staff.Controllers
                         continue;
                     }
 
-                    _context.Notifications.Add(new Notification
-                    {
-                      
-                        Title = "Task Score",
-                        Message = $"You got completed task points from manager {reviewer.Name} - {task.Task}",
-                        SenderId = reviewer.UserId,
-                        ReceiverId = receiverId, // ✅ now correct (2)
-                      
-                        RelatedId = dto.TaskCode,
-                        IsRead = false,
-                       
-                    });
+                    //_context.Notifications.Add(new Notification
+                    //{
+
+                    //    Title = "Task Score",
+                    //    Message = $"You got completed task points from manager {reviewer.Name} - {task.Task}",
+                    //    SenderId = reviewer.UserId,
+                    //    ReceiverId = receiverId, // ✅ now correct (2)
+
+                    //    RelatedId = dto.TaskCode,
+                    //    IsRead = false,
+
+                    //});
                 }
 
                 await _context.SaveChangesAsync();
-            }
+                }
 
             return Ok(new
             {
@@ -1448,20 +1448,20 @@ namespace staff.Controllers
                     ? $"Your leave request has been approved by {managerName}"
                     : $"Your leave request has been rejected by {managerName}";
 
-                _context.Notifications.Add(new Notification
-                {
+                //_context.Notifications.Add(new Notification
+                //{
                    
-                    Title = "Leave Status",
-                    Message = message,
-                    SenderId = leave.ReceiverId, // manager
-                    ReceiverId = (long)receiverId, // employee
+                //    Title = "Leave Status",
+                //    Message = message,
+                //    SenderId = leave.ReceiverId, // manager
+                //    ReceiverId = (long)receiverId, // employee
                    
-                    RelatedId = leave.Id.ToString(),
-                    IsRead = false,
+                //    RelatedId = leave.Id.ToString(),
+                //    IsRead = false,
                    
-                });
+                //});
 
-                await _context.SaveChangesAsync();
+               // await _context.SaveChangesAsync();
 
                 return Ok(new { message = "Updated successfully", data = leave });
             }
@@ -1859,23 +1859,23 @@ namespace staff.Controllers
                     await _context.SaveChangesAsync();
 
                     // Notification to manager
-                    _context.Notifications.Add(new Notification
-                    {
+                    //_context.Notifications.Add(new Notification
+                    //{
                        
-                        Title = "Leave Request",
-                        Message =
-                            $"Permission limit exceeded. Leave request received from {model.Name}",
+                    //    Title = "Leave Request",
+                    //    Message =
+                    //        $"Permission limit exceeded. Leave request received from {model.Name}",
 
-                        SenderId = senderId,
-                        ReceiverId = (long)manager.UserId,
+                    //    SenderId = senderId,
+                    //    ReceiverId = (long)manager.UserId,
 
                        
-                        RelatedId = null,
-                        IsRead = false,
+                    //    RelatedId = null,
+                    //    IsRead = false,
                        
-                    });
+                    //});
 
-                    await _context.SaveChangesAsync();
+                    //await _context.SaveChangesAsync();
 
                     return Ok(new
                     {
@@ -1925,24 +1925,24 @@ namespace staff.Controllers
                 await _context.SaveChangesAsync();
 
                 // Notification
-                _context.Notifications.Add(new Notification
-                {
+                //_context.Notifications.Add(new Notification
+                //{
                    
-                    Title = "Permission Request",
+                //    Title = "Permission Request",
 
-                    Message =
-                        $"You received a Permission request from {model.Name}",
+                //    Message =
+                //        $"You received a Permission request from {model.Name}",
 
-                    SenderId = senderId,
-                    ReceiverId = (long)manager.UserId,
+                //    SenderId = senderId,
+                //    ReceiverId = (long)manager.UserId,
 
                    
-                    RelatedId = null,
-                    IsRead = false,
+                //    RelatedId = null,
+                //    IsRead = false,
                     
-                });
+                //});
 
-                await _context.SaveChangesAsync();
+                //await _context.SaveChangesAsync();
 
                 return Ok(new
                 {
@@ -2080,20 +2080,20 @@ namespace staff.Controllers
                     ? $"Your permission request has been approved by {managerName}"
                     : $"Your permission request has been rejected by {managerName}";
 
-                _context.Notifications.Add(new Notification
-                {
+                //_context.Notifications.Add(new Notification
+                //{
                     
-                    Title = "Permission Status",
-                    Message = message,
-                    SenderId = permission.ReceiverId,
-                    ReceiverId = permission.SenderId,
+                //    Title = "Permission Status",
+                //    Message = message,
+                //    SenderId = permission.ReceiverId,
+                //    ReceiverId = permission.SenderId,
                    
-                    RelatedId = permission.Id.ToString(),
-                    IsRead = false,
+                //    RelatedId = permission.Id.ToString(),
+                //    IsRead = false,
                   
-                });
+                //});
 
-                await _context.SaveChangesAsync();
+                //await _context.SaveChangesAsync();
 
                 return Ok(new
                 {

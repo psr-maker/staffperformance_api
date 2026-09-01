@@ -628,20 +628,20 @@ namespace staff.Controllers
             string message = $"You received a warning from {sender.Role}";
 
             // ✅ Create notification
-            var notification = new Notification
-            {
+            //var notification = new Notification
+            //{
               
-                Title = request.Title,
-                Message = message,
-                SenderId = senderId,
-                ReceiverId = request.ReceiverId,
+            //    Title = request.Title,
+            //    Message = message,
+            //    SenderId = senderId,
+            //    ReceiverId = request.ReceiverId,
                 
-                RelatedId = warning.WarningId.ToString(),
+            //    RelatedId = warning.WarningId.ToString(),
             
-                IsRead = false
-            };
+            //    IsRead = false
+            //};
 
-            _context.Notifications.Add(notification);
+         //   _context.Notifications.Add(notification);
 
             // ✅ Save once
             await _context.SaveChangesAsync();
@@ -838,17 +838,17 @@ namespace staff.Controllers
 
             foreach (var r in receivers)
             {
-                _context.Notifications.Add(new Notification
-                {
+                //_context.Notifications.Add(new Notification
+                //{
                  
-                    Title = "New Announcement",
-                    Message = $"{sender.Role} {sender.Name}: {title}",
-                    SenderId = senderId,
-                    ReceiverId = r,
-                    RelatedId = announcementId.ToString(),
-                    IsRead = false,
+                //    Title = "New Announcement",
+                //    Message = $"{sender.Role} {sender.Name}: {title}",
+                //    SenderId = senderId,
+                //    ReceiverId = r,
+                //    RelatedId = announcementId.ToString(),
+                //    IsRead = false,
                    
-                });
+                //});
             }
 
             await _context.SaveChangesAsync();

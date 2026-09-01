@@ -80,18 +80,18 @@ namespace staff.Services
 
             foreach (var rid in receiverIds)
             {
-                _context.Notifications.Add(new Notification
-                {
+                //_context.Notifications.Add(new Notification
+                //{
                     
-                    Title = $"{entityType} {action}",
-                    Message = $"{department} {senderRole} {senderName} {action.ToLower()} {entityType.ToLower()} - {entityName}",
-                    SenderId = senderId,
-                    ReceiverId = rid,
+                //    Title = $"{entityType} {action}",
+                //    Message = $"{department} {senderRole} {senderName} {action.ToLower()} {entityType.ToLower()} - {entityName}",
+                //    SenderId = senderId,
+                //    ReceiverId = rid,
                   
-                    RelatedId = entityCode,
-                    IsRead = false,
+                //    RelatedId = entityCode,
+                //    IsRead = false,
                   
-                });
+                //});
             }
 
             await _context.SaveChangesAsync();
@@ -120,18 +120,18 @@ namespace staff.Services
 
             foreach (var director in directors)
             {
-                _context.Notifications.Add(new Notification
-                {
+                //_context.Notifications.Add(new Notification
+                //{
                  
-                    Title = $"User {action}",
-                    Message = message,
-                    SenderId = senderId,
-                    ReceiverId = director.UserId,
+                //    Title = $"User {action}",
+                //    Message = message,
+                //    SenderId = senderId,
+                //    ReceiverId = director.UserId,
                   
-                    RelatedId = targetUserName,
-                    IsRead = false,
+                //    RelatedId = targetUserName,
+                //    IsRead = false,
                    
-                });
+                //});
             }
 
             await _context.SaveChangesAsync();
