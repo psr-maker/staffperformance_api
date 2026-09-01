@@ -15,6 +15,7 @@ namespace staff
         public string Created_by { get; set; }
         public string Status { get; set; }
         public bool wasEdited { get; set; }
+        public string? FcmToken { get; set; }
     }
     public class Department
     {
@@ -239,9 +240,6 @@ namespace staff
     [Key]
     public long Id { get; set; }
 
-    [Required]
-    [MaxLength(50)]
-    public string Type { get; set; } = string.Empty;
 
     [Required]
     [MaxLength(255)]
@@ -255,15 +253,10 @@ namespace staff
     [Required]
     public long? ReceiverId { get; set; }
 
-    public bool IsBroadcast { get; set; } = false;
-
    public string? RelatedId { get; set; }
 
     public bool IsRead { get; set; } = false;
 
-    public DateTime? ReadAt { get; set; }
-
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
     public class MonthlyProductivity
     {
@@ -711,6 +704,12 @@ namespace staff
 
         public DateTime Date { get; set; }
     }
+
+    public class RegisterFcmTokenRequest
+    {
+        public string FcmToken { get; set; } 
+    }
+
 }
 
 

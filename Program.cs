@@ -6,10 +6,21 @@ using staff_work_tracking.Data;
 using StaffWork_Track.Services;
 using Microsoft.AspNetCore.Http.Features;
 using System.Text;
-using Microsoft.Extensions.FileProviders;
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 
+FirebaseApp.Create(new AppOptions
+{
+    Credential = GoogleCredential.FromFile(
+        Path.Combine(
+            AppContext.BaseDirectory,
+            "Firebase",
+            "firebase-service-account.json"
+        )
+    )
+});
 var builder = WebApplication.CreateBuilder(args);
-
+builder.Services.AddScoped<FirebaseNotificationService>();
 var jwtKey = builder.Configuration["Jwt:Key"];
 if (string.IsNullOrEmpty(jwtKey))
 {

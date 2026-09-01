@@ -630,14 +630,14 @@ namespace staff.Controllers
             // ✅ Create notification
             var notification = new Notification
             {
-                Type = "Warning",
+              
                 Title = request.Title,
                 Message = message,
                 SenderId = senderId,
                 ReceiverId = request.ReceiverId,
-                IsBroadcast = false,
+                
                 RelatedId = warning.WarningId.ToString(),
-                CreatedAt = DateTime.UtcNow,
+            
                 IsRead = false
             };
 
@@ -840,14 +840,14 @@ namespace staff.Controllers
             {
                 _context.Notifications.Add(new Notification
                 {
-                    Type = "Announcement",
+                 
                     Title = "New Announcement",
                     Message = $"{sender.Role} {sender.Name}: {title}",
                     SenderId = senderId,
                     ReceiverId = r,
                     RelatedId = announcementId.ToString(),
                     IsRead = false,
-                    CreatedAt = DateTime.UtcNow
+                   
                 });
             }
 

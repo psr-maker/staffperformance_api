@@ -82,15 +82,15 @@ namespace staff.Services
             {
                 _context.Notifications.Add(new Notification
                 {
-                    Type = entityType,
+                    
                     Title = $"{entityType} {action}",
                     Message = $"{department} {senderRole} {senderName} {action.ToLower()} {entityType.ToLower()} - {entityName}",
                     SenderId = senderId,
                     ReceiverId = rid,
-                    IsBroadcast = false,
+                  
                     RelatedId = entityCode,
                     IsRead = false,
-                    CreatedAt = DateTime.UtcNow
+                  
                 });
             }
 
@@ -122,15 +122,15 @@ namespace staff.Services
             {
                 _context.Notifications.Add(new Notification
                 {
-                    Type = "User",
+                 
                     Title = $"User {action}",
                     Message = message,
                     SenderId = senderId,
                     ReceiverId = director.UserId,
-                    IsBroadcast = false,
+                  
                     RelatedId = targetUserName,
                     IsRead = false,
-                    CreatedAt = DateTime.UtcNow
+                   
                 });
             }
 

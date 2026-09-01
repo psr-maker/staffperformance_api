@@ -278,25 +278,6 @@ namespace staff_work_tracking.Controllers
         }
 
 
-
-        //[HttpGet("check-email-role")]
-        //public async Task<IActionResult> CheckEmailRole(string email)
-        //{
-        //    var user = await _context.Users
-        //        .Where(u => u.Email == email)
-        //        .Select(u => new { u.Role })
-        //        .FirstOrDefaultAsync();
-
-        //    if (user == null)
-        //        return Ok(new { exists = false });
-
-        //    return Ok(new
-        //    {
-        //        exists = true,
-        //        role = user.Role
-        //    });
-        //}
-
         [HttpGet("check-email-role")]
         public async Task<IActionResult> CheckEmailRole(string email)
         {
@@ -357,6 +338,40 @@ namespace staff_work_tracking.Controllers
             return Ok(new { message = "Logged out successfully" });
         }
 
+        [Authorize]
+        [HttpPost("register-fcm-token")]
+        public async Task<IActionResult> RegisterFcmToken(
+    [FromBody] RegisterFcmTokenRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.FcmToken))
+                return BadRequest("FCM token is required.");
+
+            var userIdClaim = User.Claims
+                .FirstOrDefault(c => c.Type == "UserId")?.Value;
+
+            if (userIdClaim == null)
+                return Unauthorized("Invalid token.");
+
+            int loggedInUserId = int.Parse(userIdClaim);
+
+            // Don't trust UserId sent from Flutter.
+            // Use the UserId from the JWT.
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.UserId == loggedInUserId);
+
+            if (user == null)
+                return NotFound("User not found.");
+
+            user.FcmToken = request.FcmToken;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                message = "FCM token saved successfully."
+            });
+        }
 
 
         [Authorize]

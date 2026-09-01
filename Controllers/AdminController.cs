@@ -19,13 +19,15 @@ namespace staff.Controllers
         private readonly AppDbContext _context;
         private readonly IConfiguration _config;
         private NotificationService _notific;
+        private readonly FirebaseNotificationService _firebaseNotificationService;
         private readonly ProductivityService _service;
 
-        public AdminController(AppDbContext context, IConfiguration config, NotificationService notificationService, ProductivityService service)
+        public AdminController(AppDbContext context, IConfiguration config, NotificationService notificationService, FirebaseNotificationService firebaseNotificationService, ProductivityService service)
         {
             _context = context;
             _config = config;
             _notific = notificationService;
+            _firebaseNotificationService = firebaseNotificationService;
             _service = service;
         }
 
@@ -834,15 +836,15 @@ namespace staff.Controllers
 
                     _context.Notifications.Add(new Notification
                     {
-                        Type = "Score",
+                      
                         Title = "Task Score",
                         Message = $"You got completed task points from manager {reviewer.Name} - {task.Task}",
                         SenderId = reviewer.UserId,
                         ReceiverId = receiverId, // ✅ now correct (2)
-                        IsBroadcast = false,
+                      
                         RelatedId = dto.TaskCode,
                         IsRead = false,
-                        CreatedAt = DateTime.UtcNow
+                       
                     });
                 }
 
@@ -1226,18 +1228,34 @@ namespace staff.Controllers
                 var receiverId = manager.UserId;
                 _context.Notifications.Add(new Notification
                 {
-                    Type = "Leave",
+                 
                     Title = "Leave Request",
                     Message = $"You received a leave request from {model.Name}",
                     SenderId = model.SenderId,
                     ReceiverId = (long)receiverId,
-                    IsBroadcast = false,
+                   
                     RelatedId = null,
                     IsRead = false,
-                    CreatedAt = DateTime.UtcNow
+                 
                 });
 
                 await _context.SaveChangesAsync();
+
+                if (!string.IsNullOrWhiteSpace(manager.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            manager.FcmToken,
+                            "Leave Request",
+                            $"You received a leave request from {model.Name}"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM Error: {ex.Message}");
+                    }
+                }
 
                 return Ok(new
                 {
@@ -1432,15 +1450,15 @@ namespace staff.Controllers
 
                 _context.Notifications.Add(new Notification
                 {
-                    Type = "Leave Status",
+                   
                     Title = "Leave Status",
                     Message = message,
                     SenderId = leave.ReceiverId, // manager
                     ReceiverId = (long)receiverId, // employee
-                    IsBroadcast = false,
+                   
                     RelatedId = leave.Id.ToString(),
                     IsRead = false,
-                    CreatedAt = DateTime.UtcNow
+                   
                 });
 
                 await _context.SaveChangesAsync();
@@ -1843,7 +1861,7 @@ namespace staff.Controllers
                     // Notification to manager
                     _context.Notifications.Add(new Notification
                     {
-                        Type = "Leave",
+                       
                         Title = "Leave Request",
                         Message =
                             $"Permission limit exceeded. Leave request received from {model.Name}",
@@ -1851,10 +1869,10 @@ namespace staff.Controllers
                         SenderId = senderId,
                         ReceiverId = (long)manager.UserId,
 
-                        IsBroadcast = false,
+                       
                         RelatedId = null,
                         IsRead = false,
-                        CreatedAt = DateTime.UtcNow
+                       
                     });
 
                     await _context.SaveChangesAsync();
@@ -1909,7 +1927,7 @@ namespace staff.Controllers
                 // Notification
                 _context.Notifications.Add(new Notification
                 {
-                    Type = "Permission",
+                   
                     Title = "Permission Request",
 
                     Message =
@@ -1918,10 +1936,10 @@ namespace staff.Controllers
                     SenderId = senderId,
                     ReceiverId = (long)manager.UserId,
 
-                    IsBroadcast = false,
+                   
                     RelatedId = null,
                     IsRead = false,
-                    CreatedAt = DateTime.UtcNow
+                    
                 });
 
                 await _context.SaveChangesAsync();
@@ -2064,15 +2082,15 @@ namespace staff.Controllers
 
                 _context.Notifications.Add(new Notification
                 {
-                    Type = "Permission Status",
+                    
                     Title = "Permission Status",
                     Message = message,
                     SenderId = permission.ReceiverId,
                     ReceiverId = permission.SenderId,
-                    IsBroadcast = false,
+                   
                     RelatedId = permission.Id.ToString(),
                     IsRead = false,
-                    CreatedAt = DateTime.UtcNow
+                  
                 });
 
                 await _context.SaveChangesAsync();

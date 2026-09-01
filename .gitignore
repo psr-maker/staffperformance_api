@@ -6,3 +6,4 @@ appsettings.Development.json
 publish/
 *.user
 *.suo
+Firebase/firebase-service-account.json
