@@ -1618,7 +1618,7 @@ namespace staff.Controllers
            join r in _context.Roles
                on u.Role equals r.Id.ToString()
            where u.Department == employee.Department
-                 && r.RoleName == "2"
+                 && r.RoleName == "Manager"
                  && r.Status == true
            select u
        ).FirstOrDefaultAsync();
@@ -2366,7 +2366,7 @@ namespace staff.Controllers
        join r in _context.Roles
            on u.Role equals r.Id.ToString()
        where u.Department == employee.Department
-             && r.RoleName == "2"
+             && r.RoleName == "Manager"
              && r.Status == true
        select u
    ).FirstOrDefaultAsync();
@@ -2443,7 +2443,7 @@ namespace staff.Controllers
       join r in _context.Roles
           on u.Role equals r.Id.ToString()
       where u.Department == currentUser.Department
-            && r.RoleName == "2"
+            && r.RoleName == "Manager"
             && r.Status == true
       select u
   ).FirstOrDefaultAsync();
@@ -2648,7 +2648,7 @@ namespace staff.Controllers
       join r in _context.Roles
           on u.Role equals r.Id.ToString()
       where u.Department == user.Department
-            && r.RoleName == "2"
+            && r.RoleName == "Manager"
             && r.Status == true
       select u
   ).FirstOrDefaultAsync();
