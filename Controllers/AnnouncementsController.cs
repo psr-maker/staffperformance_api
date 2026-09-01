@@ -129,12 +129,15 @@ namespace staff.Controllers
             // SEND ANNOUNCEMENT NOTIFICATION TO TARGET ROLE
             // =====================================================
 
-            var targetUsers = await (
-                from u in _context.Users
-                where u.Role == targetRole
-                      && !string.IsNullOrWhiteSpace(u.FcmToken)
-                select u
-            ).ToListAsync();
+            var targetUsers = await _context.Users
+     .Where(u =>
+         !string.IsNullOrWhiteSpace(u.FcmToken) &&
+         (
+             targetRole == "All" ||
+             u.Role == targetRole
+         )
+     )
+     .ToListAsync();
 
             foreach (var user in targetUsers)
             {
@@ -654,7 +657,7 @@ namespace staff.Controllers
 
             _context.Warnings.Add(warning);
             // ✅ Better notification message
-            string message = $"You received a warning from {sender.Role}";
+            string message = $"You received a warning from {sender.Name}";
 
             // ✅ Create notification
             //var notification = new Notification
@@ -685,8 +688,6 @@ namespace staff.Controllers
                 {
 
                     string title = "Warning";
-
-                    string messagee = $"Warning from {sender.Name}";
 
                     await _firebaseNotificationService.SendNotificationAsync(
                         employee.FcmToken,

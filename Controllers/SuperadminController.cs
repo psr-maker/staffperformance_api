@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using staff;
 using staff.Services;
 using staff_work_tracking.Data;
+using StaffWork_Track.Services;
 using System.Data;
 
 namespace staff_work_tracking.Controllers
@@ -16,12 +17,14 @@ namespace staff_work_tracking.Controllers
         private readonly AppDbContext _context;
         private readonly IConfiguration _config;
         private NotificationService _notific;
+        private readonly FirebaseNotificationService _firebaseNotificationService;
 
-        public SuperadminController(AppDbContext context, IConfiguration config, NotificationService notificationService)
+        public SuperadminController(AppDbContext context, IConfiguration config, NotificationService notificationService, FirebaseNotificationService firebaseNotificationService)
         {
             _context = context;
             _config = config;
             _notific = notificationService;
+            _firebaseNotificationService = firebaseNotificationService;
         }
 
 
@@ -259,26 +262,39 @@ namespace staff_work_tracking.Controllers
             }
           
             await _context.SaveChangesAsync();
-            await _notific.SendTaskGoalNotification(
-     "Created",
-     "Task",
-     task.TaskCode,
-     task.Task,
-     assignedByUser.UserId,
-     assignedByUser.Name,
-     assignedByUser.Role,
-     assignedByUser.Department,
-     null, 
-     dto.AssignedToIds 
- );
-            await _context.SaveChangesAsync();
+            // =====================================================
+            // SEND TASK ASSIGNED NOTIFICATION
+            // =====================================================
+
+            foreach (var user in assignedToUsers)
+            {
+                if (!string.IsNullOrWhiteSpace(user.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            user.FcmToken,
+                            "New Task Assigned",
+                            $"A new task '{task.Task}' has been assigned to you by {assignedByUser.Name}"
+                        );
+
+
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(
+                            $"FCM Error for user {user.UserId}: {ex}"
+                        );
+                    }
+                }
+             
+            }
             return Ok(new
             {
                 message = "Task created successfully",
                 taskCode = task.TaskCode
             });
         }
-
 
 
         [Authorize]
@@ -346,19 +362,40 @@ namespace staff_work_tracking.Controllers
             _context.Goal.Add(goal);
             await _context.SaveChangesAsync();
 
-            
-            await _notific.SendTaskGoalNotification(
-                "Created",
-                "Goal",
-                goal.GoalCode,
-                goal.Title,
-                creator.UserId, 
-                creator.Name,         
-                creator.Role,            
-                creator.Department,     
-                goal.Assign_To           
-            );
 
+            //await _notific.SendTaskGoalNotification(
+            //    "Created",
+            //    "Goal",
+            //    goal.GoalCode,
+            //    goal.Title,
+            //    creator.UserId, 
+            //    creator.Name,         
+            //    creator.Role,            
+            //    creator.Department,     
+            //    goal.Assign_To           
+            //);
+
+            // =====================================================
+            // SEND GOAL NOTIFICATION TO ASSIGNED USER
+            // =====================================================
+
+            if (!string.IsNullOrWhiteSpace(user.FcmToken))
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        user.FcmToken,
+                        "New Goal Assigned",
+                        $"A new goal '{goal.Title}' has been assigned to you by {creator.Name}"
+                    );
+
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FCM Error: {ex}");
+                }
+            }
+       
             return Ok(new
             {
                 message = "Goal created successfully",
@@ -426,18 +463,30 @@ namespace staff_work_tracking.Controllers
 
             await _context.SaveChangesAsync();
 
-            await _notific.SendTaskGoalNotification(
-      "Edited",
-      "Goal",
-      goal.GoalCode,
-      goal.Title,
-      editor.UserId,
-      editor.Name,
-      editorRole,
-      editor.Department,
-      goal.Assign_To 
-  );
+            var assignToIdPart = goal.Assign_To?.Split('-')[0];
 
+            if (int.TryParse(assignToIdPart, out int assignedUserId))
+            {
+                var assignedUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == assignedUserId);
+
+                if (assignedUser != null &&
+                    !string.IsNullOrWhiteSpace(assignedUser.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            assignedUser.FcmToken,
+                            "Goal Updated",
+                            $"The goal '{goal.Title}' assigned to you was updated by {editor.Name}"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM Error: {ex}");
+                    }
+                }
+            }
             return Ok(new
             {
                 message = "Goal updated successfully"
@@ -495,24 +544,7 @@ namespace staff_work_tracking.Controllers
                 ChangeDateandTime = DateTime.Now
             });
 
-            // ✅ OPTIONAL: Audit logs for each Task (recommended)
-            //foreach (var task in tasks)
-            //{
-            //    _context.Auditlog.Add(new Auditlog
-            //    {
-            //        EntityId = task.TaskCode,
-            //        EntityType = "Task",
-            //        Action = "Delete",
-            //        Fieldchanged = "Task",
-            //        Oldvalue = task.Task,
-            //        Newvalue = "Deleted",
-            //        EditedUid = editor.UserId.ToString(),
-            //        EditedRole = editorRole,
-            //        ChangeDateandTime = DateTime.Now
-            //    });
-            //}
-
-            // ✅ Delete all tasks first
+           
             if (tasks.Any())
             {
                 _context.Tasks.RemoveRange(tasks);
@@ -521,20 +553,45 @@ namespace staff_work_tracking.Controllers
             // ✅ Delete Goal
             _context.Goal.Remove(goal);
 
-            // ✅ Send notification
-            await _notific.SendTaskGoalNotification(
-                "Deleted",
-                "Goal",
-                goal.GoalCode,
-                goal.Title,
-                editor.UserId,
-                editor.Name,
-                editorRole,
-                editor.Department,
-                goal.Assign_To
-            );
-
+         
             // ✅ Save changes
+            await _context.SaveChangesAsync();
+            // =====================================================
+            // SEND GOAL DELETED NOTIFICATION TO ASSIGNED USER
+            // =====================================================
+
+            var assignToIdPart = goal.Assign_To?.Split('-')[0];
+
+            if (int.TryParse(assignToIdPart, out int assignedUserId))
+            {
+                var assignedUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == assignedUserId);
+
+                if (assignedUser != null &&
+                    !string.IsNullOrWhiteSpace(assignedUser.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            assignedUser.FcmToken,
+                            "Goal Deleted",
+                            $"The goal '{goalName}' assigned to you was deleted by {editor.Name}"
+                        );
+
+                
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM Error: {ex}");
+                    }
+                }
+               
+            }
+
+            // Delete Goal
+            _context.Goal.Remove(goal);
+
+            // Save changes
             await _context.SaveChangesAsync();
 
             return Ok(new
@@ -868,7 +925,7 @@ namespace staff_work_tracking.Controllers
 
       [Authorize]
       [HttpPut("update-usersstatus/{userid}")]
-    public async Task<IActionResult> UpdateAdminStatus(int userid,[FromBody] StatusUpdateDto dto)
+      public async Task<IActionResult> UpdateAdminStatus(int userid,[FromBody] StatusUpdateDto dto)
     {
         var user = await _context.Users.FindAsync(userid);
         if (user == null)
@@ -913,7 +970,7 @@ namespace staff_work_tracking.Controllers
         return Ok("Status updated");
     }
 
-    [Authorize]
+        [Authorize]
         [HttpPut("Task-edit")]
         public async Task<IActionResult> EditTask([FromBody] EditTaskDto dto)
         {
@@ -1062,26 +1119,109 @@ namespace staff_work_tracking.Controllers
             }
 
             await _context.SaveChangesAsync();
-        
-            // ✅ Notification
-            if (isChanged || hasMemberChanges)
+
+            // =====================================================
+            // 1. NOTIFY REMOVED USERS
+            // =====================================================
+
+            foreach (var member in membersToRemove)
             {
-                var finalNotifyUsers = existingUserIds
-                    .Union(usersToAdd.Select(u => u.UserId))
+                int removedUserId =
+                    int.Parse(member.Assign_To.Split('-')[0]);
+
+                var removedUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == removedUserId);
+
+                if (removedUser != null &&
+                    !string.IsNullOrWhiteSpace(removedUser.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            removedUser.FcmToken!,
+                            "Removed From Task",
+                            $"You have been removed from the task '{task.Task}' by {editor.Name}"
+                        );
+
+                        Console.WriteLine(
+                            $"Removal notification sent to {removedUser.Name}"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(
+                            $"FCM Error for removed user {removedUser.UserId}: {ex.Message}"
+                        );
+                    }
+                }
+            }
+
+            // =====================================================
+            // 2. NOTIFY CURRENT MEMBERS IF TASK DETAILS CHANGED
+            // =====================================================
+
+            if (isChanged)
+            {
+                var currentUserIds = newUserIds
+                    .Distinct()
                     .ToList();
 
-                await _notific.SendTaskGoalNotification(
-                    "Edited",
-                    "Task",
-                    task.TaskCode,
-                    task.Task,
-                    editor.UserId,
-                    editor.Name,
-                    editorRole,
-                    editor.Department,
-                    null,
-                    finalNotifyUsers
-                );
+                var notifyUsers = await _context.Users
+                    .Where(u =>
+                        currentUserIds.Contains(u.UserId) &&
+                        !string.IsNullOrWhiteSpace(u.FcmToken))
+                    .ToListAsync();
+
+                foreach (var user in notifyUsers)
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            user.FcmToken!,
+                            "Task Updated",
+                            $"The task '{task.Task}' assigned to you was updated by {editor.Name}"
+                        );
+
+                        Console.WriteLine(
+                            $"Task update notification sent to {user.Name} ({user.UserId})"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(
+                            $"FCM Error for user {user.UserId}: {ex.Message}"
+                        );
+                    }
+                }
+            }
+
+            // =====================================================
+            // 3. NOTIFY NEWLY ADDED USERS
+            // =====================================================
+
+            foreach (var user in usersToAdd)
+            {
+                if (!string.IsNullOrWhiteSpace(user.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            user.FcmToken!,
+                            "Task Assigned",
+                            $"You have been added to the task '{task.Task}' by {editor.Name}"
+                        );
+
+                        Console.WriteLine(
+                            $"Task assignment notification sent to {user.Name} ({user.UserId})"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(
+                            $"FCM Error for user {user.UserId}: {ex.Message}"
+                        );
+                    }
+                }
             }
 
             return Ok(new
@@ -1146,7 +1286,11 @@ namespace staff_work_tracking.Controllers
 
             await _context.SaveChangesAsync();
 
-            // ✅ Notification after save
+            // =====================================================
+            // SEND TASK DELETED NOTIFICATION
+            // =====================================================
+
+            // Existing in-app notification
             await _notific.SendTaskGoalNotification(
                 "Deleted",
                 "Task",
@@ -1159,6 +1303,34 @@ namespace staff_work_tracking.Controllers
                 null,
                 assignedUserIds
             );
+
+            // Get assigned users with FCM tokens
+            var notifyUsers = await _context.Users
+                .Where(u =>
+                    assignedUserIds.Contains(u.UserId) &&
+                    !string.IsNullOrWhiteSpace(u.FcmToken))
+                .ToListAsync();
+
+            // Send Firebase push notification
+            foreach (var user in notifyUsers)
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        user.FcmToken!,
+                        "Task Deleted",
+                        $"The task '{taskName}' assigned to you was deleted by {editor.Name}"
+                    );
+
+                  
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(
+                        $"FCM Error for user {user.UserId}: {ex}"
+                    );
+                }
+            }
 
             return Ok(new
             {

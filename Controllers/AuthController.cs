@@ -108,14 +108,14 @@ namespace staff_work_tracking.Controllers
             await _context.SaveChangesAsync();
 
             var mail = new System.Net.Mail.MailMessage();
-            mail.From = new System.Net.Mail.MailAddress("randdpoornasreekeerthana@gmail.com");
+            mail.From = new System.Net.Mail.MailAddress("cloud2.poornasree@gmail.com");
             mail.To.Add(emailToSend);
             mail.Subject = "Your OTP Code";
-            mail.Body = $"Your OTP is {otp}. Valid for 1 minutes.";
+            mail.Body = $"Your OTP is {otp}. Valid for 10 minutes.";
 
             var smtp = new System.Net.Mail.SmtpClient("smtp.gmail.com", 587);
             smtp.Credentials = new System.Net.NetworkCredential(
-                "randdpoornasreekeerthana@gmail.com",
+                "cloud2.poornasree@gmail.com",
                 "wdhq bxuo haqk tfkg"
             );
             smtp.EnableSsl = true;

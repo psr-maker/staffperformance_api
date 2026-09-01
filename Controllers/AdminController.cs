@@ -681,7 +681,7 @@ namespace staff.Controllers
 
 
 
-            int systemPoints = CalculateTaskScore(task.Due_Date, task.Completed_Date, task.Priority);
+            int systemPoints = CalculateTaskScore(task.Due_Date, task.Completed_Date,task.Priority);
 
             int finalPoints = systemPoints;
             if (dto.IsDelayJustified && dto.ManagerPoints.HasValue)
@@ -3092,10 +3092,7 @@ namespace staff.Controllers
         }
 
        
-        private int CalculateGoalPoints(
-    List<int> taskAveragePoints,
-    string goalPriority,
-    DateTime? dueDate)
+        private int CalculateGoalPoints( List<int> taskAveragePoints,string goalPriority,DateTime? dueDate)
         {
             if (taskAveragePoints == null ||
                 taskAveragePoints.Count == 0)
