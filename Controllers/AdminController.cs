@@ -1861,7 +1861,7 @@ namespace staff.Controllers
                     // Notification to manager
                     //_context.Notifications.Add(new Notification
                     //{
-                       
+
                     //    Title = "Leave Request",
                     //    Message =
                     //        $"Permission limit exceeded. Leave request received from {model.Name}",
@@ -1869,13 +1869,29 @@ namespace staff.Controllers
                     //    SenderId = senderId,
                     //    ReceiverId = (long)manager.UserId,
 
-                       
+
                     //    RelatedId = null,
                     //    IsRead = false,
-                       
+
                     //});
 
                     //await _context.SaveChangesAsync();
+
+                    if (!string.IsNullOrWhiteSpace(manager.FcmToken))
+                    {
+                        try
+                        {
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                manager.FcmToken,
+                                "Permission Request",
+                                $"You received a Permission request from {model.Name}"
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"FCM Error: {ex.Message}");
+                        }
+                    }
 
                     return Ok(new
                     {
