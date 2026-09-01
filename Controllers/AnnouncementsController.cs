@@ -6,6 +6,7 @@ using Newtonsoft.Json;
 using OfficeOpenXml;
 using staff_work_tracking.Data;
 using StaffWork_Track.Services;
+using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
@@ -20,12 +21,14 @@ namespace staff.Controllers
         private readonly AppDbContext _context;
         private readonly IWebHostEnvironment _env;
         private readonly GeoService _geoService;
+        private readonly FirebaseNotificationService _firebaseNotificationService;
 
-        public AnnouncementsController(AppDbContext context, IWebHostEnvironment env, GeoService geoService)
+        public AnnouncementsController(AppDbContext context, IWebHostEnvironment env, GeoService geoService, FirebaseNotificationService firebaseNotificationService)
         {
             _context = context;
             _env = env;
             _geoService = geoService;
+            _firebaseNotificationService = firebaseNotificationService;
         }
 
 
@@ -122,12 +125,38 @@ namespace staff.Controllers
 
             _context.Announcements.Add(announcement);
             await _context.SaveChangesAsync();
-            await SendAnnouncementNotifications(
-      senderId,
-      title,
-      targetRole,
-      announcement.Id
-  );
+            // =====================================================
+            // SEND ANNOUNCEMENT NOTIFICATION TO TARGET ROLE
+            // =====================================================
+
+            var targetUsers = await (
+                from u in _context.Users
+                where u.Role == targetRole
+                      && !string.IsNullOrWhiteSpace(u.FcmToken)
+                select u
+            ).ToListAsync();
+
+            foreach (var user in targetUsers)
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        user.FcmToken!,
+                        "New Announcement",
+                        title
+                    );
+
+                    Console.WriteLine(
+                        $"Announcement notification sent to {user.Name} ({user.UserId})"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(
+                        $"FCM Error for user {user.UserId}: {ex.Message}"
+                    );
+                }
+            }
             return Ok(new
             {
                 message = "Announcement created",
@@ -645,6 +674,32 @@ namespace staff.Controllers
 
             // ✅ Save once
             await _context.SaveChangesAsync();
+
+            var employee = await _context.Users
+.FirstOrDefaultAsync(u => u.UserId == request.ReceiverId);
+
+            if (employee != null &&
+                !string.IsNullOrWhiteSpace(employee.FcmToken))
+            {
+                try
+                {
+
+                    string title = "Warning";
+
+                    string messagee = $"Warning from {sender.Name}";
+
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        employee.FcmToken,
+                        title,
+                        message
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FCM Error: {ex}");
+                }
+            }
+         
 
             return Ok(new
             {

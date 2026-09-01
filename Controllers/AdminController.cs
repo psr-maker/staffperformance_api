@@ -1830,12 +1830,12 @@ namespace staff.Controllers
                         managerName = manager.Name ?? "Manager";
 
                     string title = extraWork.Status == "Approved"
-                        ? "Leave Approved"
-                        : "Leave Rejected";
+                        ? "Compensation Approved"
+                        : "Compensation Rejected";
 
                     string message = extraWork.Status == "Approved"
-                        ? $"Your leave request has been approved by {managerName}"
-                        : $"Your leave request has been rejected by {managerName}";
+                        ? $"Your Compensation request has been approved by {managerName}"
+                        : $"Your Compensation request has been rejected by {managerName}";
 
                     await _firebaseNotificationService.SendNotificationAsync(
                         employee.FcmToken,
@@ -2731,12 +2731,12 @@ namespace staff.Controllers
                 {
 
                     string title = correction.Status == "Approved"
-                        ? "Leave Approved"
-                        : "Leave Rejected";
+                        ? "punch correction Approved"
+                        : "punch correction Rejected";
 
                     string message = correction.Status == "Approved"
-                        ? $"Your leave request has been approved by Manager"
-                        : $"Your leave request has been rejected by Manager";
+                        ? $"Your punch correction request has been approved by Manager"
+                        : $"Your punch correction request has been rejected by Manager";
 
                     await _firebaseNotificationService.SendNotificationAsync(
                         employee.FcmToken,
