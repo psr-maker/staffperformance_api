@@ -1217,7 +1217,21 @@ namespace staff.Controllers
 
                 await _context.LeaveForm.AddRangeAsync(leaveList);
                 await _context.SaveChangesAsync(); // leaveList rows now have real Ids
-
+                if (!string.IsNullOrWhiteSpace(manager.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            manager.FcmToken,
+                            "Permission Request",
+                            $"You received a permission request from {model.Name}"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM Error: {ex}");
+                    }
+                }
                 if (matchedExtraWork != null && compensationLeaveRow != null)
                 {
                     compensationLeaveRow.CompensationExtraWorkId = matchedExtraWork.Id;
