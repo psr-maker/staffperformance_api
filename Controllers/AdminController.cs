@@ -1774,9 +1774,7 @@ namespace staff.Controllers
                 if (requestedMinutes <= 0)
                     return BadRequest("Invalid permission duration");
 
-                // =====================================================
-                // 5. FIND THIS MONTH'S PERMISSION USAGE
-                // =====================================================
+           
 
                 var monthStart = new DateTime(
                     model.Date.Year,
@@ -1800,18 +1798,12 @@ namespace staff.Controllers
                 int existingPermissionMinutes =
                     (int)Math.Round(usedMinutes);
 
-                // =====================================================
-                // 6. CHECK MONTHLY LIMIT
-                // =====================================================
-
                 int monthlyLimit = 60;
 
                 int totalAfterRequest =
                     existingPermissionMinutes + requestedMinutes;
 
-                // =====================================================
-                // 7. FIND MANAGER
-                // =====================================================
+             
 
                 var manager = await (
       from u in _context.Users
@@ -1889,7 +1881,7 @@ namespace staff.Controllers
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"FCM Error: {ex.Message}");
+                            Console.WriteLine($"FCM Error: {ex}");
                         }
                     }
 
