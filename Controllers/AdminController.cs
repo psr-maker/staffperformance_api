@@ -1217,21 +1217,7 @@ namespace staff.Controllers
 
                 await _context.LeaveForm.AddRangeAsync(leaveList);
                 await _context.SaveChangesAsync(); // leaveList rows now have real Ids
-                if (!string.IsNullOrWhiteSpace(manager.FcmToken))
-                {
-                    try
-                    {
-                        await _firebaseNotificationService.SendNotificationAsync(
-                            manager.FcmToken,
-                            "Permission Request",
-                            $"You received a permission request from {model.Name}"
-                        );
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"FCM Error: {ex}");
-                    }
-                }
+            
                 if (matchedExtraWork != null && compensationLeaveRow != null)
                 {
                     compensationLeaveRow.CompensationExtraWorkId = matchedExtraWork.Id;
@@ -1950,7 +1936,7 @@ namespace staff.Controllers
                 // Notification
                 //_context.Notifications.Add(new Notification
                 //{
-                   
+
                 //    Title = "Permission Request",
 
                 //    Message =
@@ -1959,14 +1945,28 @@ namespace staff.Controllers
                 //    SenderId = senderId,
                 //    ReceiverId = (long)manager.UserId,
 
-                   
+
                 //    RelatedId = null,
                 //    IsRead = false,
-                    
+
                 //});
 
                 //await _context.SaveChangesAsync();
-
+                if (!string.IsNullOrWhiteSpace(manager.FcmToken))
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            manager.FcmToken,
+                            "Permission Request",
+                            $"You received a permission request from {model.Name}"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM Error: {ex}");
+                    }
+                }
                 return Ok(new
                 {
                     message = "Permission applied successfully",
