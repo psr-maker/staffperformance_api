@@ -1226,20 +1226,20 @@ namespace staff.Controllers
                 }
 
                 var receiverId = manager.UserId;
-                _context.Notifications.Add(new Notification
-                {
+                //_context.Notifications.Add(new Notification
+                //{
                  
-                    Title = "Leave Request",
-                    Message = $"You received a leave request from {model.Name}",
-                    SenderId = model.SenderId,
-                    ReceiverId = (long)receiverId,
+                //    Title = "Leave Request",
+                //    Message = $"You received a leave request from {model.Name}",
+                //    SenderId = model.SenderId,
+                //    ReceiverId = (long)receiverId,
                    
-                    RelatedId = null,
-                    IsRead = false,
+                //    RelatedId = null,
+                //    IsRead = false,
                  
-                });
+                //});
 
-                await _context.SaveChangesAsync();
+                //await _context.SaveChangesAsync();
 
                 if (!string.IsNullOrWhiteSpace(manager.FcmToken))
                 {
