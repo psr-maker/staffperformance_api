@@ -1,8 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +6,11 @@ using Microsoft.IdentityModel.Tokens;
 using staff;
 using staff.Services;
 using staff_work_tracking.Data;
+using StaffWork_Track.Services;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 
 namespace staff_work_tracking.Controllers
@@ -21,12 +22,14 @@ namespace staff_work_tracking.Controllers
         private readonly AppDbContext _context;
         private readonly IConfiguration _config;
         private NotificationService _notific;
+        private readonly FirebaseNotificationService _firebaseNotificationService;
 
-        public AuthController(AppDbContext context, IConfiguration config, NotificationService notificationService)
+        public AuthController(AppDbContext context, IConfiguration config, NotificationService notificationService, FirebaseNotificationService firebaseNotificationService)
         {
             _context = context;
             _config = config;
             _notific = notificationService;
+            _firebaseNotificationService = firebaseNotificationService;
         }
 
         [HttpPost("send-otp")]
@@ -259,16 +262,50 @@ namespace staff_work_tracking.Controllers
             if (creator == null)
                 return BadRequest("Creator not found");
 
+            var directors = await _context.Users
+       .Join(
+           _context.Roles,
+           user => user.Role,
+           role => role.RoleName,
+           (user, role) => new
+           {
+               User = user,
+               Role = role
+           }
+       )
+       .Where(x =>
+           x.Role.Position == 1 &&
+           !string.IsNullOrWhiteSpace(x.User.FcmToken))
+       .Select(x => x.User)
+       .ToListAsync();
 
-            await _notific.SendUserCrudNotificationToDirector(
-     "Created",
-     creator.UserId,
-     creator.Name,
-     creator.Role,
-     creator.Department,
-     user.Name
- );
-            await _context.SaveChangesAsync();
+
+            // =====================================================
+            // DIRECTOR NOTIFICATION
+            // =====================================================
+
+            string directorMessage =
+                $"{creator.Name} created a new user {user.Name} " +
+                $"in {user.Department} department.";
+
+
+            foreach (var director in directors)
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        director.FcmToken,
+                        "New User Created",
+                        directorMessage
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(
+                        $"Director FCM Error ({director.UserId}): {ex.Message}"
+                    );
+                }
+            }
 
             return Ok(new
             {

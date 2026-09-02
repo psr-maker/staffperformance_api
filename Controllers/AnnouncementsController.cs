@@ -657,8 +657,7 @@ namespace staff.Controllers
 
             _context.Warnings.Add(warning);
             // ✅ Better notification message
-            string message = $"You received a warning from {sender.Name}";
-
+       
             // ✅ Create notification
             //var notification = new Notification
             //{
@@ -678,30 +677,90 @@ namespace staff.Controllers
             // ✅ Save once
             await _context.SaveChangesAsync();
 
+            // Get employee who received warning
             var employee = await _context.Users
-.FirstOrDefaultAsync(u => u.UserId == request.ReceiverId);
+                .FirstOrDefaultAsync(u => u.UserId == request.ReceiverId);
 
-            if (employee != null &&
-                !string.IsNullOrWhiteSpace(employee.FcmToken))
+            if (employee == null)
+            {
+                return NotFound("Employee not found.");
+            }
+
+            // Notification message
+            string employeeMessage =
+                $"You received a warning from {sender.Name}";
+
+            // ==========================================
+            // 1. SEND NOTIFICATION TO EMPLOYEE
+            // ==========================================
+
+            if (!string.IsNullOrWhiteSpace(employee.FcmToken))
             {
                 try
                 {
-
-                    string title = "Warning";
-
                     await _firebaseNotificationService.SendNotificationAsync(
                         employee.FcmToken,
-                        title,
-                        message
+                        "Warning",
+                        employeeMessage
                     );
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"FCM Error: {ex}");
+                    Console.WriteLine($"Employee FCM Error: {ex}");
                 }
             }
-         
 
+            // ==========================================
+            // 2. GET ALL DIRECTORS
+            // Position = 1
+            // ==========================================
+
+            var directors = await _context.Users
+   .Where(u => !string.IsNullOrWhiteSpace(u.FcmToken))
+   .ToListAsync();
+
+            var directorUsers = new List<User>();
+
+            foreach (var user in directors)
+            {
+                if (int.TryParse(user.Role, out int roleId))
+                {
+                    var role = await _context.Roles
+                        .FirstOrDefaultAsync(r => r.Id == roleId);
+
+                    if (role != null && role.Position == 1)
+                    {
+                        directorUsers.Add(user);
+                    }
+                }
+            }
+
+            // ==========================================
+            // 3. SEND NOTIFICATION TO DIRECTORS
+            // ==========================================
+
+            string directorMessage =
+     $"{employee.Name} from {employee.Department} received a warning from {sender.Name}";
+
+            foreach (var director in directors)
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        director.FcmToken,
+                        "Employee Warning",
+                        directorMessage
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(
+                        $"Director FCM Error ({director.UserId}): {ex}"
+                    );
+                }
+            }
+
+         
             return Ok(new
             {
                 message = "Warning sent successfully",

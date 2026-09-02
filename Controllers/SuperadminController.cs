@@ -289,6 +289,56 @@ namespace staff_work_tracking.Controllers
                 }
              
             }
+            var creatorRoleInfo = await _context.Roles
+      .FirstOrDefaultAsync(r =>
+          r.RoleName == assignedByUser.Role);
+
+            if (creatorRoleInfo != null)
+            {
+                // Find ONLY the immediate higher position.
+                //
+                // Staff (4) -> Assistant Manager (3)
+                // Assistant Manager (3) -> Manager (2)
+                // Manager (2) -> Director (1)
+                //
+                var upperRole = await _context.Roles
+                    .Where(r =>
+                        r.Position < creatorRoleInfo.Position)
+                    .OrderByDescending(r => r.Position)
+                    .FirstOrDefaultAsync();
+
+                if (upperRole != null)
+                {
+                    // Get upper-position users
+                    // from the SAME department
+                    var upperUsers = await _context.Users
+                        .Where(u =>
+                            u.Department == assignedByUser.Department &&
+                            u.Role == upperRole.RoleName &&
+                            !string.IsNullOrWhiteSpace(u.FcmToken))
+                        .ToListAsync();
+
+                    foreach (var upperUser in upperUsers)
+                    {
+                        try
+                        {
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                upperUser.FcmToken!,
+                                "New Task Created",
+                                $"{assignedByUser.Name} created a new task '{task.Task}'"
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                $"Upper Position FCM Error " +
+                                $"({upperUser.UserId}): {ex}"
+                            );
+                        }
+                    }
+                }
+            }
+
             return Ok(new
             {
                 message = "Task created successfully",
@@ -362,23 +412,6 @@ namespace staff_work_tracking.Controllers
             _context.Goal.Add(goal);
             await _context.SaveChangesAsync();
 
-
-            //await _notific.SendTaskGoalNotification(
-            //    "Created",
-            //    "Goal",
-            //    goal.GoalCode,
-            //    goal.Title,
-            //    creator.UserId, 
-            //    creator.Name,         
-            //    creator.Role,            
-            //    creator.Department,     
-            //    goal.Assign_To           
-            //);
-
-            // =====================================================
-            // SEND GOAL NOTIFICATION TO ASSIGNED USER
-            // =====================================================
-
             if (!string.IsNullOrWhiteSpace(user.FcmToken))
             {
                 try
@@ -395,7 +428,53 @@ namespace staff_work_tracking.Controllers
                     Console.WriteLine($"FCM Error: {ex}");
                 }
             }
-       
+            var creatorRoleInfo = await _context.Roles
+    .FirstOrDefaultAsync(r => r.RoleName == creator.Role);
+
+            if (creatorRoleInfo != null)
+            {
+                // Find the immediate higher position
+                // Example:
+                // Staff Position 4 -> Assistant Manager Position 3
+                // Assistant Manager Position 3 -> Manager Position 2
+                // Manager Position 2 -> Director Position 1
+
+                var upperRole = await _context.Roles
+                    .Where(r =>
+                        r.Position < creatorRoleInfo.Position)
+                    .OrderByDescending(r => r.Position)
+                    .FirstOrDefaultAsync();
+
+                if (upperRole != null)
+                {
+                    // Get users in the same department
+                    // who have the immediate upper role
+                    var upperUsers = await _context.Users
+                        .Where(u =>
+                            u.Department == creator.Department &&
+                            u.Role == upperRole.RoleName &&
+                            !string.IsNullOrWhiteSpace(u.FcmToken))
+                        .ToListAsync();
+
+                    foreach (var upperUser in upperUsers)
+                    {
+                        try
+                        {
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                upperUser.FcmToken,
+                                "Goal Created",
+                                $"{creator.Name} created a new goal '{goal.Title}'"
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}"
+                            );
+                        }
+                    }
+                }
+            }
             return Ok(new
             {
                 message = "Goal created successfully",
@@ -487,6 +566,64 @@ namespace staff_work_tracking.Controllers
                     }
                 }
             }
+
+            var editorRoleInfo = await _context.Roles
+       .FirstOrDefaultAsync(r => r.RoleName == editor.Role);
+
+            if (editorRoleInfo != null)
+            {
+                // =================================================
+                // FIND IMMEDIATE UPPER ROLE
+                // =================================================
+
+                var upperRole = await _context.Roles
+                    .Where(r =>
+                        r.Position < editorRoleInfo.Position)
+                    .OrderByDescending(r => r.Position)
+                    .FirstOrDefaultAsync();
+
+
+                if (upperRole != null)
+                {
+                    // =============================================
+                    // FIND USERS IN SAME DEPARTMENT
+                    // WITH IMMEDIATE UPPER ROLE
+                    // =============================================
+
+                    var upperUsers = await _context.Users
+                        .Where(u =>
+                            u.Department == editor.Department &&
+                            u.Role == upperRole.RoleName &&
+                            !string.IsNullOrWhiteSpace(u.FcmToken))
+                        .ToListAsync();
+
+
+                    // =============================================
+                    // SEND NOTIFICATION TO UPPER USER
+                    // =============================================
+
+                    foreach (var upperUser in upperUsers)
+                    {
+                        try
+                        {
+                            await _firebaseNotificationService
+                                .SendNotificationAsync(
+                                    upperUser.FcmToken,
+                                    "Goal Updated",
+                                    $"{editor.Name} updated the goal '{goal.Title}'"
+                                );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                $"Upper Position FCM Error " +
+                                $"({upperUser.UserId}): {ex}"
+                            );
+                        }
+                    }
+                }
+            }
+
             return Ok(new
             {
                 message = "Goal updated successfully"
@@ -593,6 +730,61 @@ namespace staff_work_tracking.Controllers
 
             // Save changes
             await _context.SaveChangesAsync();
+            var editorRoleInfo = await _context.Roles
+     .FirstOrDefaultAsync(r => r.RoleName == editor.Role);
+
+            if (editorRoleInfo != null)
+            {
+                // =================================================
+                // FIND IMMEDIATE UPPER ROLE
+                // =================================================
+
+                var upperRole = await _context.Roles
+                    .Where(r =>
+                        r.Position < editorRoleInfo.Position)
+                    .OrderByDescending(r => r.Position)
+                    .FirstOrDefaultAsync();
+
+                if (upperRole != null)
+                {
+                    // =============================================
+                    // FIND SAME DEPARTMENT + UPPER POSITION
+                    // =============================================
+
+                    var upperUsers = await _context.Users
+                        .Where(u =>
+                            u.Department == editor.Department &&
+                            u.Role == upperRole.RoleName &&
+                            !string.IsNullOrWhiteSpace(u.FcmToken))
+                        .ToListAsync();
+
+
+                    // =============================================
+                    // SEND NOTIFICATION
+                    // =============================================
+
+                    foreach (var upperUser in upperUsers)
+                    {
+                        try
+                        {
+                            await _firebaseNotificationService
+                                .SendNotificationAsync(
+                                    upperUser.FcmToken,
+                                    "Goal Deleted",
+                                    $"{editor.Name} deleted the goal '{goalName}'"
+                                );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                $"Upper Position FCM Error " +
+                                $"({upperUser.UserId}): {ex}"
+                            );
+                        }
+                    }
+                }
+            }
+
 
             return Ok(new
             {
@@ -1224,6 +1416,90 @@ namespace staff_work_tracking.Controllers
                 }
             }
 
+            // =====================================================
+            // 4. NOTIFY IMMEDIATE UPPER POSITION
+            //    IF TASK EDITED OR MEMBERS CHANGED
+            // =====================================================
+
+            if (isChanged || hasMemberChanges)
+            {
+                // Get editor's role position
+                var editorRoleInfo = await _context.Roles
+                    .FirstOrDefaultAsync(r => r.RoleName == editor.Role);
+
+                if (editorRoleInfo != null)
+                {
+                    // Find immediate upper role
+                    //
+                    // Staff (4) -> Assistant Manager (3)
+                    // Assistant Manager (3) -> Manager (2)
+                    // Manager (2) -> Director (1)
+
+                    var upperRole = await _context.Roles
+                        .Where(r =>
+                            r.Position < editorRoleInfo.Position)
+                        .OrderByDescending(r => r.Position)
+                        .FirstOrDefaultAsync();
+
+                    if (upperRole != null)
+                    {
+                        // Find users in same department
+                        // having the immediate upper role
+                        var upperUsers = await _context.Users
+                            .Where(u =>
+                                u.Department == editor.Department &&
+                                u.Role == upperRole.RoleName &&
+                                !string.IsNullOrWhiteSpace(u.FcmToken))
+                            .ToListAsync();
+
+                        foreach (var upperUser in upperUsers)
+                        {
+                            try
+                            {
+                                string notificationMessage;
+
+                                if (hasMemberChanges && isChanged)
+                                {
+                                    notificationMessage =
+                                        $"{editor.Name} edited the task '{task.Task}' " +
+                                        "and changed its assigned members.";
+                                }
+                                else if (hasMemberChanges)
+                                {
+                                    notificationMessage =
+                                        $"{editor.Name} changed the assigned members " +
+                                        $"of the task '{task.Task}'.";
+                                }
+                                else
+                                {
+                                    notificationMessage =
+                                        $"{editor.Name} updated the task '{task.Task}'.";
+                                }
+
+                                await _firebaseNotificationService
+                                    .SendNotificationAsync(
+                                        upperUser.FcmToken!,
+                                        "Task Updated",
+                                        notificationMessage
+                                    );
+
+                                Console.WriteLine(
+                                    $"Upper position notification sent to " +
+                                    $"{upperUser.Name} ({upperUser.UserId})"
+                                );
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine(
+                                    $"Upper Position FCM Error " +
+                                    $"({upperUser.UserId}): {ex.Message}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
             return Ok(new
             {
                 message = "Task updated successfully",
@@ -1331,7 +1607,56 @@ namespace staff_work_tracking.Controllers
                     );
                 }
             }
+            var editorRoleInfo = await _context.Roles
+       .FirstOrDefaultAsync(r =>
+           r.RoleName == editor.Role);
 
+            if (editorRoleInfo != null)
+            {
+                // Find the immediate higher position
+                //
+                // Example:
+                // Staff 4 -> Assistant Manager 3
+                // Assistant Manager 3 -> Manager 2
+                // Manager 2 -> Director 1
+                //
+                var upperRole = await _context.Roles
+                    .Where(r =>
+                        r.Position < editorRoleInfo.Position)
+                    .OrderByDescending(r => r.Position)
+                    .FirstOrDefaultAsync();
+
+                if (upperRole != null)
+                {
+                    // Get upper-position users
+                    // from the SAME department
+                    var upperUsers = await _context.Users
+                        .Where(u =>
+                            u.Department == editor.Department &&
+                            u.Role == upperRole.RoleName &&
+                            !string.IsNullOrWhiteSpace(u.FcmToken))
+                        .ToListAsync();
+
+                    foreach (var upperUser in upperUsers)
+                    {
+                        try
+                        {
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                upperUser.FcmToken!,
+                                "Task Deleted",
+                                $"{editor.Name} deleted the task '{taskName}'"
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                $"Upper Position FCM Error " +
+                                $"({upperUser.UserId}): {ex}"
+                            );
+                        }
+                    }
+                }
+            }
             return Ok(new
             {
                 message = $"Task '{taskName}' deleted successfully"
@@ -1505,15 +1830,51 @@ namespace staff_work_tracking.Controllers
 
             await _context.SaveChangesAsync();
 
-            // ✅ Notification
-            await _notific.SendUserCrudNotificationToDirector(
-                "Deleted",
-                editor.UserId,
-                editor.Name,
-                editor.Role,
-                editor.Department,
-                userName
-            );
+            var directors = await _context.Users
+        .Join(
+            _context.Roles,
+            u => u.Role,
+            r => r.RoleName,
+            (u, r) => new
+            {
+                User = u,
+                Role = r
+            }
+        )
+        .Where(x =>
+            x.Role.Position == 1 &&
+            !string.IsNullOrWhiteSpace(x.User.FcmToken))
+        .Select(x => x.User)
+        .ToListAsync();
+
+
+            // ==========================================
+            // DIRECTOR NOTIFICATION
+            // ==========================================
+
+            string directorMessage =
+                $"{editor.Name} deleted {userName} ";
+
+
+            foreach (var director in directors)
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        director.FcmToken,
+                        "User Deleted",
+                        directorMessage
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(
+                        $"Director FCM Error ({director.UserId}): {ex.Message}"
+                    );
+                }
+            }
+
+
 
             return Ok(new
             {
@@ -1579,18 +1940,47 @@ namespace staff_work_tracking.Controllers
                 user.wasEdited = true;
 
             await _context.SaveChangesAsync();
-
-            // ✅ Notification
             if (userChanged)
             {
-                await _notific.SendUserCrudNotificationToDirector(
-                    "Edit",
-                    editor.UserId,
-                    editor.Name,
-                    editor.Role,
-                    editor.Department,
-                    user.Name
-                );
+                var directors = await _context.Users
+                    .Join(
+                        _context.Roles,
+                        u => u.Role,
+                        r => r.RoleName,
+                        (u, r) => new
+                        {
+                            User = u,
+                            Role = r
+                        }
+                    )
+                    .Where(x =>
+                        x.Role.Position == 1 &&
+                        !string.IsNullOrWhiteSpace(x.User.FcmToken))
+                    .Select(x => x.User)
+                    .ToListAsync();
+
+
+                string directorMessage =
+                    $"{editor.Name} updated {user.Name}'s user details.";
+
+
+                foreach (var director in directors)
+                {
+                    try
+                    {
+                        await _firebaseNotificationService.SendNotificationAsync(
+                            director.FcmToken,
+                            "User Updated",
+                            directorMessage
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(
+                            $"Director FCM Error ({director.UserId}): {ex.Message}"
+                        );
+                    }
+                }
             }
 
             return Ok(new { message = "User updated successfully" });

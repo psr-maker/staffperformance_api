@@ -9,6 +9,7 @@ using System.Text;
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
 
+
 FirebaseApp.Create(new AppOptions
 {
     Credential = GoogleCredential.FromFile(
@@ -84,6 +85,7 @@ builder.WebHost.ConfigureKestrel(serverOptions =>
 {
     serverOptions.Limits.MaxRequestBodySize = 50 * 1024 * 1024;
 });
+builder.Services.AddHostedService<MonthlyProductivityReminderService>();
 var app = builder.Build();
 
 
