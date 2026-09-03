@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using staff;
@@ -559,63 +560,45 @@ namespace staff_work_tracking.Controllers
                 }
             }
 
-            var editorRoleInfo = await _context.Roles
-       .FirstOrDefaultAsync(r => r.RoleName == editor.Role);
-
-            if (editorRoleInfo != null)
+            if (int.TryParse(editor.Role, out int creatorPosition))
             {
-                // =================================================
-                // FIND IMMEDIATE UPPER ROLE
-                // =================================================
-
+                // Find immediate higher position
                 var upperRole = await _context.Roles
                     .Where(r =>
-                        r.Position < editorRoleInfo.Position)
+                        r.Status &&
+                        r.Position < creatorPosition)
                     .OrderByDescending(r => r.Position)
                     .FirstOrDefaultAsync();
 
-
                 if (upperRole != null)
                 {
-                    // =============================================
-                    // FIND USERS IN SAME DEPARTMENT
-                    // WITH IMMEDIATE UPPER ROLE
-                    // =============================================
-
+                    // Users.Role stores the position number
                     var upperUsers = await _context.Users
                         .Where(u =>
                             u.Department == editor.Department &&
-                            u.Role == upperRole.RoleName &&
+                            u.Role == upperRole.Position.ToString() &&
                             !string.IsNullOrWhiteSpace(u.FcmToken))
                         .ToListAsync();
-
-
-                    // =============================================
-                    // SEND NOTIFICATION TO UPPER USER
-                    // =============================================
 
                     foreach (var upperUser in upperUsers)
                     {
                         try
                         {
-                            await _firebaseNotificationService
-                                .SendNotificationAsync(
-                                    upperUser.FcmToken,
-                                    "Goal Updated",
-                                    $"{editor.Name} updated the goal '{goal.Title}'"
-                                );
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                         upperUser.FcmToken,
+                                         "Goal Updated",
+                                         $"{editor.Name} updated the goal '{goal.Title}'"
+                                     );
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine(
-                                $"Upper Position FCM Error " +
-                                $"({upperUser.UserId}): {ex}"
+                                $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}"
                             );
                         }
                     }
                 }
             }
-
             return Ok(new
             {
                 message = "Goal updated successfully"
@@ -722,38 +705,26 @@ namespace staff_work_tracking.Controllers
 
             // Save changes
             await _context.SaveChangesAsync();
-            var editorRoleInfo = await _context.Roles
-     .FirstOrDefaultAsync(r => r.RoleName == editor.Role);
-
-            if (editorRoleInfo != null)
+     
+            if (int.TryParse(editor.Role, out int creatorPosition))
             {
-                // =================================================
-                // FIND IMMEDIATE UPPER ROLE
-                // =================================================
-
+                // Find immediate higher position
                 var upperRole = await _context.Roles
                     .Where(r =>
-                        r.Position < editorRoleInfo.Position)
+                        r.Status &&
+                        r.Position < creatorPosition)
                     .OrderByDescending(r => r.Position)
                     .FirstOrDefaultAsync();
 
                 if (upperRole != null)
                 {
-                    // =============================================
-                    // FIND SAME DEPARTMENT + UPPER POSITION
-                    // =============================================
-
+                    // Users.Role stores the position number
                     var upperUsers = await _context.Users
                         .Where(u =>
                             u.Department == editor.Department &&
-                            u.Role == upperRole.RoleName &&
+                            u.Role == upperRole.Position.ToString() &&
                             !string.IsNullOrWhiteSpace(u.FcmToken))
                         .ToListAsync();
-
-
-                    // =============================================
-                    // SEND NOTIFICATION
-                    // =============================================
 
                     foreach (var upperUser in upperUsers)
                     {
@@ -769,14 +740,12 @@ namespace staff_work_tracking.Controllers
                         catch (Exception ex)
                         {
                             Console.WriteLine(
-                                $"Upper Position FCM Error " +
-                                $"({upperUser.UserId}): {ex}"
+                                $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}"
                             );
                         }
                     }
                 }
             }
-
 
             return Ok(new
             {
@@ -1415,82 +1384,123 @@ namespace staff_work_tracking.Controllers
 
             if (isChanged || hasMemberChanges)
             {
-                // Get editor's role position
-                var editorRoleInfo = await _context.Roles
-                    .FirstOrDefaultAsync(r => r.RoleName == editor.Role);
+                if (int.TryParse(editor.Role, out int creatorPosition))
+            {
+                // Find immediate higher position
+                var upperRole = await _context.Roles
+                    .Where(r =>
+                        r.Status &&
+                        r.Position < creatorPosition)
+                    .OrderByDescending(r => r.Position)
+                    .FirstOrDefaultAsync();
 
-                if (editorRoleInfo != null)
+                if (upperRole != null)
                 {
-                    // Find immediate upper role
-                    //
-                    // Staff (4) -> Assistant Manager (3)
-                    // Assistant Manager (3) -> Manager (2)
-                    // Manager (2) -> Director (1)
+                    // Users.Role stores the position number
+                    var upperUsers = await _context.Users
+                        .Where(u =>
+                            u.Department == editor.Department &&
+                            u.Role == upperRole.Position.ToString() &&
+                            !string.IsNullOrWhiteSpace(u.FcmToken))
+                        .ToListAsync();
 
-                    var upperRole = await _context.Roles
-                        .Where(r =>
-                            r.Position < editorRoleInfo.Position)
-                        .OrderByDescending(r => r.Position)
-                        .FirstOrDefaultAsync();
-
-                    if (upperRole != null)
+                    foreach (var upperUser in upperUsers)
                     {
-                        // Find users in same department
-                        // having the immediate upper role
-                        var upperUsers = await _context.Users
-                            .Where(u =>
-                                u.Department == editor.Department &&
-                                u.Role == upperRole.RoleName &&
-                                !string.IsNullOrWhiteSpace(u.FcmToken))
-                            .ToListAsync();
-
-                        foreach (var upperUser in upperUsers)
+                        try
                         {
-                            try
-                            {
-                                string notificationMessage;
-
-                                if (hasMemberChanges && isChanged)
-                                {
-                                    notificationMessage =
-                                        $"{editor.Name} edited the task '{task.Task}' " +
-                                        "and changed its assigned members.";
-                                }
-                                else if (hasMemberChanges)
-                                {
-                                    notificationMessage =
-                                        $"{editor.Name} changed the assigned members " +
-                                        $"of the task '{task.Task}'.";
-                                }
-                                else
-                                {
-                                    notificationMessage =
-                                        $"{editor.Name} updated the task '{task.Task}'.";
-                                }
-
-                                await _firebaseNotificationService
-                                    .SendNotificationAsync(
-                                        upperUser.FcmToken!,
-                                        "Task Updated",
-                                        notificationMessage
-                                    );
-
-                                Console.WriteLine(
-                                    $"Upper position notification sent to " +
-                                    $"{upperUser.Name} ({upperUser.UserId})"
-                                );
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine(
-                                    $"Upper Position FCM Error " +
-                                    $"({upperUser.UserId}): {ex.Message}"
-                                );
-                            }
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                         upperUser.FcmToken,
+                                         "Task Updated",
+                                         $"{editor.Name} updated the task '{task.Task}'"
+                                     );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}"
+                            );
                         }
                     }
                 }
             }
+            //    // Get editor's role position
+            //    var editorRoleInfo = await _context.Roles
+            //        .FirstOrDefaultAsync(r => r.RoleName == editor.Role);
+
+            //    if (editorRoleInfo != null)
+            //    {
+            //        // Find immediate upper role
+            //        //
+            //        // Staff (4) -> Assistant Manager (3)
+            //        // Assistant Manager (3) -> Manager (2)
+            //        // Manager (2) -> Director (1)
+
+            //        var upperRole = await _context.Roles
+            //            .Where(r =>
+            //                r.Position < editorRoleInfo.Position)
+            //            .OrderByDescending(r => r.Position)
+            //            .FirstOrDefaultAsync();
+
+            //        if (upperRole != null)
+            //        {
+            //            // Find users in same department
+            //            // having the immediate upper role
+            //            var upperUsers = await _context.Users
+            //                .Where(u =>
+            //                    u.Department == editor.Department &&
+            //                    u.Role == upperRole.RoleName &&
+            //                    !string.IsNullOrWhiteSpace(u.FcmToken))
+            //                .ToListAsync();
+
+            //            foreach (var upperUser in upperUsers)
+            //            {
+            //                try
+            //                {
+            //                    string notificationMessage;
+
+            //                    if (hasMemberChanges && isChanged)
+            //                    {
+            //                        notificationMessage =
+            //                            $"{editor.Name} edited the task '{task.Task}' " +
+            //                            "and changed its assigned members.";
+            //                    }
+            //                    else if (hasMemberChanges)
+            //                    {
+            //                        notificationMessage =
+            //                            $"{editor.Name} changed the assigned members " +
+            //                            $"of the task '{task.Task}'.";
+            //                    }
+            //                    else
+            //                    {
+            //                        notificationMessage =
+            //                            $"{editor.Name} updated the task '{task.Task}'.";
+            //                    }
+
+            //                    await _firebaseNotificationService
+            //                        .SendNotificationAsync(
+            //                            upperUser.FcmToken!,
+            //                            "Task Updated",
+            //                            notificationMessage
+            //                        );
+
+            //                    Console.WriteLine(
+            //                        $"Upper position notification sent to " +
+            //                        $"{upperUser.Name} ({upperUser.UserId})"
+            //                    );
+            //                }
+            //                catch (Exception ex)
+            //                {
+            //                    Console.WriteLine(
+            //                        $"Upper Position FCM Error " +
+            //                        $"({upperUser.UserId}): {ex.Message}"
+            //                    );
+            //                }
+            //            }
+            //        }
+            //    }
+        }
+
+
 
             return Ok(new
             {

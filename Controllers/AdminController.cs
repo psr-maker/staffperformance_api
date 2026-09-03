@@ -688,7 +688,7 @@ namespace staff.Controllers
 
 
 
-            int systemPoints = CalculateTaskScore(task.Due_Date, task.Completed_Date,task.Priority,task.EndTime);
+            int systemPoints = CalculateTaskScore(task.Due_Date, task.Completed_Date,task.Priority,task.EndTime, task.Created_At);
 
             int finalPoints = systemPoints;
             if (dto.IsDelayJustified && dto.ManagerPoints.HasValue)
@@ -939,7 +939,8 @@ namespace staff.Controllers
                         task.Due_Date,
                         task.Completed_Date,
                         task.Priority,
-                        task.EndTime
+                        task.EndTime,
+                        task.Created_At
                     );
 
                     result.Add(new
@@ -3050,7 +3051,7 @@ namespace staff.Controllers
             }
         }
 
-        private int CalculateTaskScore(DateTime dueDate, DateTime? completedDate, string priority, TimeSpan? endTime)
+        private int CalculateTaskScore(DateTime dueDate, DateTime? completedDate, string priority, TimeSpan? endTime, DateTime startDate)
         {
             if (completedDate == null)
                 return 0;
@@ -3058,62 +3059,159 @@ namespace staff.Controllers
             int timeScore;
 
             // If EndTime is available, compare complete Date + Time
-            if (endTime.HasValue)
+            //if (endTime.HasValue)
+            //{
+            //    DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
+
+            //    TimeSpan difference = completedDate.Value - dueDateTime;
+
+            //    if (difference < TimeSpan.Zero)
+            //    {
+            //        // Completed before due time
+            //        timeScore = 100;
+            //    }
+            //    else if (difference == TimeSpan.Zero)
+            //    {
+            //        // Completed exactly at due time
+            //        timeScore = 95;
+            //    }
+            //    else
+            //    {
+            //        // Late
+            //        int lateHours = (int)Math.Ceiling(
+            //            difference.TotalHours
+            //        );
+
+            //        timeScore = 95 - (lateHours * 5);
+
+            //        // Minimum 50
+            //        timeScore = Math.Max(timeScore, 50);
+            //    }
+            //}
+            //else
+            //{
+            //    // No EndTime → use existing date-only calculation
+            //    int lateDays = (completedDate.Value.Date - dueDate.Date).Days;
+
+            //    if (lateDays < 0)
+            //        timeScore = 100;
+            //    else if (lateDays == 0)
+            //        timeScore = 95;
+            //    else if (lateDays == 1)
+            //        timeScore = 90;
+            //    else if (lateDays == 2)
+            //        timeScore = 85;
+            //    else if (lateDays == 3)
+            //        timeScore = 80;
+            //    else if (lateDays == 4)
+            //        timeScore = 75;
+            //    else if (lateDays == 5)
+            //        timeScore = 70;
+            //    else if (lateDays == 6)
+            //        timeScore = 65;
+            //    else if (lateDays == 7)
+            //        timeScore = 60;
+            //    else if (lateDays == 8)
+            //        timeScore = 55;
+            //    else
+            //        timeScore = 50;
+            //}
+            if (startDate.Date == dueDate.Date &&
+     completedDate.Value.Date == dueDate.Date)
             {
-                DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
-
-                TimeSpan difference = completedDate.Value - dueDateTime;
-
-                if (difference < TimeSpan.Zero)
+                if (endTime.HasValue)
                 {
-                    // Completed before due time
-                    timeScore = 100;
-                }
-                else if (difference == TimeSpan.Zero)
-                {
-                    // Completed exactly at due time
-                    timeScore = 95;
+                    DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
+
+                    TimeSpan difference = completedDate.Value - dueDateTime;
+
+                    if (difference < TimeSpan.Zero)
+                    {
+                        // Completed before EndTime
+                        timeScore = 100;
+                    }
+                    else if (difference == TimeSpan.Zero)
+                    {
+                        // Completed exactly at EndTime
+                        timeScore = 95;
+                    }
+                    else
+                    {
+                        // Completed after EndTime
+                        int lateHours = (int)Math.Ceiling(
+                            difference.TotalHours
+                        );
+
+                        timeScore = 95 - (lateHours * 5);
+
+                        timeScore = Math.Max(timeScore, 50);
+                    }
                 }
                 else
                 {
-                    // Late
-                    int lateHours = (int)Math.Ceiling(
-                        difference.TotalHours
-                    );
-
-                    timeScore = 95 - (lateHours * 5);
-
-                    // Minimum 50
-                    timeScore = Math.Max(timeScore, 50);
+                    // All 3 dates are same and no EndTime
+                    // No reduction
+                    timeScore = 100;
                 }
             }
             else
             {
-                // No EndTime → use existing date-only calculation
-                int lateDays = (completedDate.Value.Date - dueDate.Date).Days;
+                // ============================================
+                // YOUR EXISTING CODE
+                // ============================================
 
-                if (lateDays < 0)
-                    timeScore = 100;
-                else if (lateDays == 0)
-                    timeScore = 95;
-                else if (lateDays == 1)
-                    timeScore = 90;
-                else if (lateDays == 2)
-                    timeScore = 85;
-                else if (lateDays == 3)
-                    timeScore = 80;
-                else if (lateDays == 4)
-                    timeScore = 75;
-                else if (lateDays == 5)
-                    timeScore = 70;
-                else if (lateDays == 6)
-                    timeScore = 65;
-                else if (lateDays == 7)
-                    timeScore = 60;
-                else if (lateDays == 8)
-                    timeScore = 55;
+                if (endTime.HasValue)
+                {
+                    DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
+
+                    TimeSpan difference = completedDate.Value - dueDateTime;
+
+                    if (difference < TimeSpan.Zero)
+                    {
+                        timeScore = 100;
+                    }
+                    else if (difference == TimeSpan.Zero)
+                    {
+                        timeScore = 95;
+                    }
+                    else
+                    {
+                        int lateHours = (int)Math.Ceiling(
+                            difference.TotalHours
+                        );
+
+                        timeScore = 95 - (lateHours * 5);
+
+                        timeScore = Math.Max(timeScore, 50);
+                    }
+                }
                 else
-                    timeScore = 50;
+                {
+                    int lateDays = (completedDate.Value.Date - dueDate.Date).Days;
+
+                    if (lateDays < 0)
+                        timeScore = 100;
+                    else if (lateDays == 0)
+                        timeScore = 95;
+                    else if (lateDays == 1)
+                        timeScore = 90;
+                    else if (lateDays == 2)
+                        timeScore = 85;
+                    else if (lateDays == 3)
+                        timeScore = 80;
+                    else if (lateDays == 4)
+                        timeScore = 75;
+                    else if (lateDays == 5)
+                        timeScore = 70;
+                    else if (lateDays == 6)
+                        timeScore = 65;
+                    else if (lateDays == 7)
+                        timeScore = 60;
+                    else if (lateDays == 8)
+                        timeScore = 55;
+                    else
+                        timeScore = 50;
+                }
             }
 
             int priorityBonus = 0;
