@@ -592,9 +592,16 @@ namespace staff.Controllers
          
             taskMember.UserStatus = dto.Status;
             task.Status = dto.Status;
+            //if (dto.Status == "completed")
+            //    task.Completed_Date = DateTime.Now;
             if (dto.Status == "completed")
-                task.Completed_Date = DateTime.Now;
-
+            {
+                var indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+                task.Completed_Date = TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTime.UtcNow,
+                    indiaTimeZone
+                );
+            }
             await _context.SaveChangesAsync();
 
           
@@ -3047,33 +3054,6 @@ namespace staff.Controllers
         {
             if (completedDate == null)
                 return 0;
-
-            //int timeScore;
-
-            //int lateDays = (completedDate.Value.Date - dueDate.Date).Days;
-
-            //if (lateDays < 0)
-            //    timeScore = 100;
-            //else if (lateDays == 0)
-            //    timeScore = 95;
-            //else if (lateDays == 1)
-            //    timeScore = 90;
-            //else if (lateDays == 2)
-            //    timeScore = 85;
-            //else if (lateDays == 3)
-            //    timeScore = 80;
-            //else if (lateDays == 4)
-            //    timeScore = 75;
-            //else if (lateDays == 5)
-            //    timeScore = 70;
-            //else if (lateDays == 6)
-            //    timeScore = 65;
-            //else if (lateDays == 7)
-            //    timeScore = 60;
-            //else if (lateDays == 8)
-            //    timeScore = 55;
-            //else
-            //    timeScore = 50;
 
             int timeScore;
 

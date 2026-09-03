@@ -428,31 +428,23 @@ namespace staff_work_tracking.Controllers
                     Console.WriteLine($"FCM Error: {ex}");
                 }
             }
-            var creatorRoleInfo = await _context.Roles
-    .FirstOrDefaultAsync(r => r.RoleName == creator.Role);
-
-            if (creatorRoleInfo != null)
+            if (int.TryParse(creator.Role, out int creatorPosition))
             {
-                // Find the immediate higher position
-                // Example:
-                // Staff Position 4 -> Assistant Manager Position 3
-                // Assistant Manager Position 3 -> Manager Position 2
-                // Manager Position 2 -> Director Position 1
-
+                // Find immediate higher position
                 var upperRole = await _context.Roles
                     .Where(r =>
-                        r.Position < creatorRoleInfo.Position)
+                        r.Status &&
+                        r.Position < creatorPosition)
                     .OrderByDescending(r => r.Position)
                     .FirstOrDefaultAsync();
 
                 if (upperRole != null)
                 {
-                    // Get users in the same department
-                    // who have the immediate upper role
+                    // Users.Role stores the position number
                     var upperUsers = await _context.Users
                         .Where(u =>
                             u.Department == creator.Department &&
-                            u.Role == upperRole.RoleName &&
+                            u.Role == upperRole.Position.ToString() &&
                             !string.IsNullOrWhiteSpace(u.FcmToken))
                         .ToListAsync();
 
