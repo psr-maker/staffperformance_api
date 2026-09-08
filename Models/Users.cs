@@ -388,24 +388,45 @@ namespace staff
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
     }
+ 
     public class OverTime
-    {
-        public int Id { get; set; }
+        {
+            public int Id { get; set; }
 
-        public int Uid { get; set; }
-        public string Dept { get; set; }
-       
-        public DateTime Date { get; set; }
+            // Staff who is expected to do overtime
+            public int Uid { get; set; }
 
-        public TimeSpan FromTime { get; set; }
-        public TimeSpan ToTime { get; set; }
+            // Department
+            public string Dept { get; set; }
 
-        public decimal TotalHours { get; set; }
-        public string Reason { get; set; } 
-        public string Approved_by { get; set; }
-        public bool isApprov { get; set; }
-    }
+            // Overtime date and time
+            public DateTime Date { get; set; }
 
+            public TimeSpan FromTime { get; set; }
+
+            public TimeSpan ToTime { get; set; }
+
+            public decimal TotalHours { get; set; }
+
+            // Manager's reason for requesting overtime
+            public string Reason { get; set; }
+        public int? Approved_by { get; set; }
+
+        // Pending / Accepted / Rejected
+        public string StaffStatus { get; set; }
+
+            // If staff rejects, store the reason
+
+            // Pending / Approved / Rejected
+            public string ManagerStatus { get; set; }
+
+        // If manager rejects after overtime
+        public string? StaffResponseReason { get; set; }
+        public string? ManagerResponseReason { get; set; }
+        // Manager who created the overtime request
+        public int? RequestedBy { get; set; }
+        }
+  
     public class TaskMemberRemoval
     {
         [Key]
@@ -439,28 +460,21 @@ namespace staff
     public class ExtraWork
     {
         public int Id { get; set; }
-
-        public int UserId { get; set; }
-
-        public DateTime WorkedDate { get; set; }
-
+        public int ManagerId { get; set; }
+        public int StaffId { get; set; }
+        public string? TaskId { get; set; }
         public string WorkType { get; set; }
-        // WeeklyOff, PublicHoliday, CompanyHoliday, Other
-
+        public DateTime WorkDate { get; set; }
+        public decimal ExpectedHours { get; set; }
         public TimeSpan StartTime { get; set; }
 
         public TimeSpan EndTime { get; set; }
-
-        public decimal TotalHours { get; set; }
-
-        public string Reason { get; set; } 
-
+        public string Reason { get; set; }
         public string Status { get; set; }
-        // Pending, Approved, Rejected
-
-        public int? ApprovedBy { get; set; }
-        public bool IsCompensationUsed { get; set; } 
-
+        public string? StaffRemarks { get; set; }
+        public string? ManagerRemarks { get; set; }
+        public int? VerifiedBy { get; set; }
+        public bool IsCompensationUsed { get; set; }
     }
 
     public class PunchCorrection
@@ -634,43 +648,11 @@ namespace staff
         public IFormFile? ProfileImage { get; set; }
     }
 
-    public class CreateOverTimeDto
-    {
-        public int Uid { get; set; }
-        public string Dept { get; set; }
-        public DateTime Date { get; set; }
-
-        public string FromTime { get; set; }
-        public string ToTime { get; set; }
-        public string Reason { get; set; } 
-    }
-    public class ApproveOverTimeDto
-    {
-        public bool IsApproved { get; set; }
-    }
-
     public class RemoveTaskMemberDto
     {
         public int UserId { get; set; }
 
         public string? Reason { get; set; }
-    }
-
-    public class CreateExtraWorkDto
-    {
-        public DateTime WorkedDate { get; set; }
-
-        public string WorkType { get; set; }
-
-        public TimeSpan StartTime { get; set; }
-
-        public TimeSpan EndTime { get; set; }
-
-        public string Reason { get; set; }
-    }
-    public class UpdateExtraWorkStatusDto
-    {
-        public string Status { get; set; } 
     }
 
     public class PunchCorrectionDto
@@ -710,6 +692,55 @@ namespace staff
         public string FcmToken { get; set; } 
     }
 
+    public class CreateOvertimeDto
+    {
+        public int Uid { get; set; }
+        public string Dept { get; set; }
+        public DateTime Date { get; set; }
+        public TimeSpan FromTime { get; set; }
+        public TimeSpan ToTime { get; set; }
+        public string Reason { get; set; }
+    }
+
+    public class StaffOvertimeResponseDto
+    {
+        public string Status { get; set; }
+        public string? Reason { get; set; }
+    }
+    public class ManagerOvertimeResponseDto
+    {
+        public string Status { get; set; }
+        public string? Reason { get; set; }
+    }
+
+    public class CreateExtraWorkRequest
+    {
+        public int StaffId { get; set; }
+
+        public string? TaskId { get; set; }
+
+        public string WorkType { get; set; } 
+
+        public DateTime WorkDate { get; set; }
+
+        public decimal ExpectedHours { get; set; }
+
+        public TimeSpan StartTime { get; set; }
+
+        public TimeSpan EndTime { get; set; }
+
+        public string Reason { get; set; }
+    }
+    public class StaffExtraWorkResponseDto
+    {
+        public string Status { get; set; } 
+        public string? StaffRemarks { get; set; }
+    }
+    public class ManagerExtraWorkResponseRequest
+    {
+        public string Status { get; set; } = string.Empty;
+        public string? ManagerRemarks { get; set; }
+    }
 }
 
 

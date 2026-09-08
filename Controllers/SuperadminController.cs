@@ -1423,85 +1423,8 @@ namespace staff_work_tracking.Controllers
                     }
                 }
             }
-            //    // Get editor's role position
-            //    var editorRoleInfo = await _context.Roles
-            //        .FirstOrDefaultAsync(r => r.RoleName == editor.Role);
-
-            //    if (editorRoleInfo != null)
-            //    {
-            //        // Find immediate upper role
-            //        //
-            //        // Staff (4) -> Assistant Manager (3)
-            //        // Assistant Manager (3) -> Manager (2)
-            //        // Manager (2) -> Director (1)
-
-            //        var upperRole = await _context.Roles
-            //            .Where(r =>
-            //                r.Position < editorRoleInfo.Position)
-            //            .OrderByDescending(r => r.Position)
-            //            .FirstOrDefaultAsync();
-
-            //        if (upperRole != null)
-            //        {
-            //            // Find users in same department
-            //            // having the immediate upper role
-            //            var upperUsers = await _context.Users
-            //                .Where(u =>
-            //                    u.Department == editor.Department &&
-            //                    u.Role == upperRole.RoleName &&
-            //                    !string.IsNullOrWhiteSpace(u.FcmToken))
-            //                .ToListAsync();
-
-            //            foreach (var upperUser in upperUsers)
-            //            {
-            //                try
-            //                {
-            //                    string notificationMessage;
-
-            //                    if (hasMemberChanges && isChanged)
-            //                    {
-            //                        notificationMessage =
-            //                            $"{editor.Name} edited the task '{task.Task}' " +
-            //                            "and changed its assigned members.";
-            //                    }
-            //                    else if (hasMemberChanges)
-            //                    {
-            //                        notificationMessage =
-            //                            $"{editor.Name} changed the assigned members " +
-            //                            $"of the task '{task.Task}'.";
-            //                    }
-            //                    else
-            //                    {
-            //                        notificationMessage =
-            //                            $"{editor.Name} updated the task '{task.Task}'.";
-            //                    }
-
-            //                    await _firebaseNotificationService
-            //                        .SendNotificationAsync(
-            //                            upperUser.FcmToken!,
-            //                            "Task Updated",
-            //                            notificationMessage
-            //                        );
-
-            //                    Console.WriteLine(
-            //                        $"Upper position notification sent to " +
-            //                        $"{upperUser.Name} ({upperUser.UserId})"
-            //                    );
-            //                }
-            //                catch (Exception ex)
-            //                {
-            //                    Console.WriteLine(
-            //                        $"Upper Position FCM Error " +
-            //                        $"({upperUser.UserId}): {ex.Message}"
-            //                    );
-            //                }
-            //            }
-            //        }
-            //    }
+          
         }
-
-
-
             return Ok(new
             {
                 message = "Task updated successfully",

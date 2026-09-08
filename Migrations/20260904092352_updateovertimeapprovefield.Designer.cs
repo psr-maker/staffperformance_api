@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using staff_work_tracking.Data;
 
@@ -11,9 +12,11 @@ using staff_work_tracking.Data;
 namespace StaffWork_Track.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260904092352_updateovertimeapprovefield")]
+    partial class updateovertimeapprovefield
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -182,29 +185,17 @@ namespace StaffWork_Track.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("ApprovedBy")
+                        .HasColumnType("int");
+
                     b.Property<TimeSpan>("EndTime")
                         .HasColumnType("time(6)");
-
-                    b.Property<decimal>("ExpectedHours")
-                        .HasColumnType("decimal(65,30)");
 
                     b.Property<bool>("IsCompensationUsed")
                         .HasColumnType("tinyint(1)");
 
-                    b.Property<int>("ManagerId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("ManagerRemarks")
-                        .HasColumnType("longtext");
-
                     b.Property<string>("Reason")
                         .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<int>("StaffId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("StaffRemarks")
                         .HasColumnType("longtext");
 
                     b.Property<TimeSpan>("StartTime")
@@ -214,18 +205,18 @@ namespace StaffWork_Track.Migrations
                         .IsRequired()
                         .HasColumnType("longtext");
 
-                    b.Property<string>("TaskId")
-                        .HasColumnType("longtext");
+                    b.Property<decimal>("TotalHours")
+                        .HasColumnType("decimal(65,30)");
 
-                    b.Property<int?>("VerifiedBy")
+                    b.Property<int>("UserId")
                         .HasColumnType("int");
-
-                    b.Property<DateTime>("WorkDate")
-                        .HasColumnType("datetime(6)");
 
                     b.Property<string>("WorkType")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<DateTime>("WorkedDate")
+                        .HasColumnType("datetime(6)");
 
                     b.HasKey("Id");
 

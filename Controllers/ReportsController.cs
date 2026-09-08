@@ -1054,7 +1054,7 @@ namespace staff.Controllers
                                 l.CompensationExtraWorkId,
 
                             compensationDate =
-                                compensation?.WorkedDate,
+                                compensation?.WorkDate,
                         };
                     })
                     .ToList();

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.IdentityModel.Tokens;
 using staff.Services;
 using staff_work_tracking.Data;
 using StaffWork_Track.Services;
@@ -652,220 +653,489 @@ namespace staff.Controllers
             });
         }
 
+        //        [Authorize]
+        //        [HttpPost("review-task")]
+        //        public async Task<IActionResult> SubmitReview([FromBody] ReviewTaskDto dto)
+        //        {
+        //            var userIdClaim = User.FindFirst("UserId");
+
+        //            if (userIdClaim == null)
+        //                return Unauthorized();
+
+        //            int reviewerId = int.Parse(userIdClaim.Value);
+
+        //            var reviewer = await _context.Users
+        //                .FirstOrDefaultAsync(u => u.UserId == reviewerId);
+
+        //            if (reviewer == null)
+        //                return BadRequest("Reviewer not found");
+
+        //            var task = await _context.Tasks
+        //                .FirstOrDefaultAsync(t => t.TaskCode == dto.TaskCode);
+
+        //            if (task == null)
+        //                return NotFound("Task not found");
+
+        //            if (task.Status != "completed")
+        //                return BadRequest("Task not completed");
+
+        //            var alreadyReviewed = await _context.TaskReview
+        //     .AnyAsync(r =>
+        //         r.TaskCode == dto.TaskCode &&
+        //         r.StaffId == dto.StaffId);
+
+        //            if (alreadyReviewed)
+        //                return BadRequest("Task already reviewed");
+
+
+
+        //            int systemPoints = CalculateTaskScore(task.Due_Date, task.Completed_Date,task.Priority,task.EndTime, task.Created_At);
+
+        //            int finalPoints = systemPoints;
+        //            if (dto.IsDelayJustified && dto.ManagerPoints.HasValue)
+        //            {
+        //                finalPoints = dto.ManagerPoints.Value;
+        //            }
+
+
+
+        //            if (dto.IsDelayJustified && dto.ManagerPoints.HasValue)
+        //            {
+        //                finalPoints = dto.ManagerPoints.Value;
+        //            }
+
+        //            var review = new TaskReview
+        //            {
+        //                TaskCode = dto.TaskCode,
+        //                StaffId = dto.StaffId,
+
+        //                ReviewedById = $"{reviewer.UserId}-{reviewer.Name}",
+
+        //                SystemPoints = systemPoints,
+        //                FinalPoints = finalPoints,
+
+        //                IsDelayJustified = dto.IsDelayJustified,
+        //                DelayReason = dto.DelayReason,
+        //                Comment = dto.Comment,
+
+        //                ReviewedAt = DateTime.Now
+        //            };
+
+        //            _context.TaskReview.Add(review);
+        //            await _context.SaveChangesAsync();
+
+        //            if (!string.IsNullOrEmpty(task.GoalCode))
+        //{
+        //    var goal = await _context.Goal
+        //        .FirstOrDefaultAsync(g =>
+        //            g.GoalCode == task.GoalCode);
+
+        //    if (goal != null)
+        //    {
+        //        var goalTasks = await _context.Tasks
+        //            .Where(t => t.GoalCode == goal.GoalCode)
+        //            .ToListAsync();
+
+        //        var taskCodes = goalTasks
+        //            .Select(t => t.TaskCode)
+        //            .ToList();
+
+        //        var reviews = await _context.TaskReview
+        //            .Where(r => taskCodes.Contains(r.TaskCode))
+        //            .ToListAsync();
+
+        //        bool allTasksReviewed = true;
+
+        //        // Check every staff member of every task
+        //        foreach (var goalTask in goalTasks)
+        //        {
+        //            var members = await _context.TaskMembers
+        //                .Where(tm => tm.TaskCode == goalTask.TaskCode)
+        //                .ToListAsync();
+
+        //            foreach (var member in members)
+        //            {
+        //                if (string.IsNullOrWhiteSpace(member.Assign_To))
+        //                    continue;
+
+        //                var parts = member.Assign_To.Split('-');
+
+        //                if (!int.TryParse(parts[0], out int staffId))
+        //                    continue;
+
+        //                bool reviewed = reviews.Any(r =>
+        //                    r.TaskCode == goalTask.TaskCode &&
+        //                    r.StaffId == staffId);
+
+        //                if (!reviewed)
+        //                {
+        //                    allTasksReviewed = false;
+        //                    break;
+        //                }
+        //            }
+
+        //            if (!allTasksReviewed)
+        //                break;
+        //        }
+
+        //        // Only calculate when every assigned staff member
+        //        // has a review for every task
+        //        if (allTasksReviewed)
+        //        {
+        //            var taskAveragePoints = new List<int>();
+
+        //            foreach (var goalTask in goalTasks)
+        //            {
+        //                var taskReviews = reviews
+        //                    .Where(r =>
+        //                        r.TaskCode == goalTask.TaskCode)
+        //                    .ToList();
+
+        //                if (taskReviews.Count == 0)
+        //                    continue;
+
+        //                double taskAverage = taskReviews
+        //                    .Average(r => r.FinalPoints);
+
+        //                taskAveragePoints.Add(
+        //                    (int)Math.Round(taskAverage)
+        //                );
+        //            }
+
+        //            if (taskAveragePoints.Count > 0)
+        //            {
+        //                goal.Goalpoints = CalculateGoalPoints(
+        //                    taskAveragePoints,
+        //                    goal.Priority,
+        //                    goal.DueDate
+        //                );
+
+        //                await _context.SaveChangesAsync();
+        //            }
+        //        }
+        //    }
+        //}
+        //            if (finalPoints > 0)
+        //            {
+        //                // ✅ Step 1: Get all members for this task
+        //                var taskMembers = await _context.TaskMembers
+        //                    .Where(tm => tm.TaskCode == dto.TaskCode)
+        //                    .ToListAsync();
+
+        //                if (!taskMembers.Any())
+        //                {
+        //                    Console.WriteLine("No task members found");
+        //                }
+
+        //                foreach (var member in taskMembers)
+        //                {
+        //                    if (string.IsNullOrWhiteSpace(member.Assign_To))
+        //                        continue;
+
+        //                    // ✅ Split "2-Abi" → ["2", "Abi"]
+        //                    var parts = member.Assign_To.Split('-');
+
+        //                    if (parts.Length == 0)
+        //                        continue;
+
+        //                    // ✅ Take ID part
+        //                    if (!long.TryParse(parts[0], out long receiverId))
+        //                    {
+        //                        Console.WriteLine($"Invalid Assign_To format: {member.Assign_To}");
+        //                        continue;
+        //                    }
+        //                }
+
+        //                await _context.SaveChangesAsync();
+        //                }
+
+        //            return Ok(new
+        //            {
+        //                message = "Review submitted successfully",
+        //                systemPoints,
+        //                finalPoints
+        //            });
+        //        }
+
+
+
         [Authorize]
         [HttpPost("review-task")]
         public async Task<IActionResult> SubmitReview([FromBody] ReviewTaskDto dto)
         {
-            var userIdClaim = User.FindFirst("UserId");
 
-            if (userIdClaim == null)
-                return Unauthorized();
+            if (dto == null)
+                return BadRequest("Review data is required.");
 
-            int reviewerId = int.Parse(userIdClaim.Value);
+            if (string.IsNullOrWhiteSpace(dto.TaskCode))
+                return BadRequest("TaskCode is required.");
+
+            if (dto.StaffId <= 0)
+                return BadRequest("StaffId is required.");
+
+            // If delay is justified, reason is mandatory
+            if (dto.IsDelayJustified &&
+                string.IsNullOrWhiteSpace(dto.DelayReason))
+            {
+                return BadRequest(
+                    "Delay reason is required when delay is justified.");
+            }
+
+            if (dto.IsDelayJustified &&
+                !dto.ManagerPoints.HasValue)
+            {
+                return BadRequest(
+                    "ManagerPoints is required when delay is justified.");
+            }
+
+            if (dto.ManagerPoints.HasValue &&
+                (dto.ManagerPoints.Value < 0 ||
+                 dto.ManagerPoints.Value > 100))
+            {
+                return BadRequest(
+                    "ManagerPoints must be between 0 and 100.");
+            }
+
+            var userIdClaim = User.FindFirst("UserId")?.Value;
+
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+                return Unauthorized("User ID not found in token.");
+
+            if (!int.TryParse(userIdClaim, out int reviewerId))
+                return Unauthorized("Invalid User ID in token.");
 
             var reviewer = await _context.Users
                 .FirstOrDefaultAsync(u => u.UserId == reviewerId);
 
             if (reviewer == null)
-                return BadRequest("Reviewer not found");
+                return BadRequest("Reviewer not found.");
 
             var task = await _context.Tasks
-                .FirstOrDefaultAsync(t => t.TaskCode == dto.TaskCode);
+                .FirstOrDefaultAsync(t =>
+                    t.TaskCode == dto.TaskCode);
 
             if (task == null)
-                return NotFound("Task not found");
+                return NotFound("Task not found.");
 
-            if (task.Status != "completed")
-                return BadRequest("Task not completed");
+            if (!string.Equals(
+                    task.Status,
+                    "completed",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(
+                    "Task is not completed yet.");
+            }
+
+            var taskMember = await _context.TaskMembers
+                .FirstOrDefaultAsync(tm =>
+                    tm.TaskCode == dto.TaskCode &&
+                    tm.Assign_To != null &&
+                    tm.Assign_To.StartsWith(
+                        dto.StaffId.ToString() + "-"));
+
+            if (taskMember == null)
+            {
+                return BadRequest(
+                    "This staff member is not assigned to this task.");
+            }
 
             var alreadyReviewed = await _context.TaskReview
-     .AnyAsync(r =>
-         r.TaskCode == dto.TaskCode &&
-         r.StaffId == dto.StaffId);
+                .AnyAsync(r =>
+                    r.TaskCode == dto.TaskCode &&
+                    r.StaffId == dto.StaffId);
 
             if (alreadyReviewed)
-                return BadRequest("Task already reviewed");
+            {
+                return BadRequest(
+                    "This task has already been reviewed for this staff member.");
+            }
+
+            int systemPoints = CalculateTaskScore(
+     task.Due_Date,
+     task.Completed_Date,
+     task.Priority,
+     task.EndTime,
+     task.Created_At
+ );
+
+            // System Points = maximum 90
+            systemPoints = Math.Clamp(systemPoints, 0, 90);
 
 
-
-            int systemPoints = CalculateTaskScore(task.Due_Date, task.Completed_Date,task.Priority,task.EndTime, task.Created_At);
+            // Final Points
+            // Normally = System Points
+            // Justified delay = Manager Points (maximum 100)
 
             int finalPoints = systemPoints;
-            if (dto.IsDelayJustified && dto.ManagerPoints.HasValue)
+
+            if (dto.IsDelayJustified)
             {
-                finalPoints = dto.ManagerPoints.Value;
+                finalPoints = dto.ManagerPoints!.Value;
+
+                // Manager can give up to 100
+                finalPoints = Math.Clamp(finalPoints, 0, 100);
             }
-
-
-
-            if (dto.IsDelayJustified && dto.ManagerPoints.HasValue)
-            {
-                finalPoints = dto.ManagerPoints.Value;
-            }
-
             var review = new TaskReview
             {
                 TaskCode = dto.TaskCode,
+
                 StaffId = dto.StaffId,
 
-                ReviewedById = $"{reviewer.UserId}-{reviewer.Name}",
+                ReviewedById =
+                    $"{reviewer.UserId}-{reviewer.Name}",
 
                 SystemPoints = systemPoints,
+
                 FinalPoints = finalPoints,
 
                 IsDelayJustified = dto.IsDelayJustified,
-                DelayReason = dto.DelayReason,
-                Comment = dto.Comment,
+
+                DelayReason = dto.IsDelayJustified
+                    ? dto.DelayReason?.Trim()
+                    : null,
+
+                Comment = string.IsNullOrWhiteSpace(dto.Comment)
+                    ? null
+                    : dto.Comment.Trim(),
 
                 ReviewedAt = DateTime.Now
             };
 
             _context.TaskReview.Add(review);
+
             await _context.SaveChangesAsync();
 
-            if (!string.IsNullOrEmpty(task.GoalCode))
-{
-    var goal = await _context.Goal
-        .FirstOrDefaultAsync(g =>
-            g.GoalCode == task.GoalCode);
-
-    if (goal != null)
-    {
-        var goalTasks = await _context.Tasks
-            .Where(t => t.GoalCode == goal.GoalCode)
-            .ToListAsync();
-
-        var taskCodes = goalTasks
-            .Select(t => t.TaskCode)
-            .ToList();
-
-        var reviews = await _context.TaskReview
-            .Where(r => taskCodes.Contains(r.TaskCode))
-            .ToListAsync();
-
-        bool allTasksReviewed = true;
-
-        // Check every staff member of every task
-        foreach (var goalTask in goalTasks)
-        {
-            var members = await _context.TaskMembers
-                .Where(tm => tm.TaskCode == goalTask.TaskCode)
-                .ToListAsync();
-
-            foreach (var member in members)
+            if (!string.IsNullOrWhiteSpace(task.GoalCode))
             {
-                if (string.IsNullOrWhiteSpace(member.Assign_To))
-                    continue;
+                var goal = await _context.Goal
+                    .FirstOrDefaultAsync(g =>
+                        g.GoalCode == task.GoalCode);
 
-                var parts = member.Assign_To.Split('-');
-
-                if (!int.TryParse(parts[0], out int staffId))
-                    continue;
-
-                bool reviewed = reviews.Any(r =>
-                    r.TaskCode == goalTask.TaskCode &&
-                    r.StaffId == staffId);
-
-                if (!reviewed)
+                if (goal != null)
                 {
-                    allTasksReviewed = false;
-                    break;
-                }
-            }
 
-            if (!allTasksReviewed)
-                break;
-        }
+                    var goalTasks = await _context.Tasks
+                        .Where(t =>
+                            t.GoalCode == goal.GoalCode)
+                        .ToListAsync();
 
-        // Only calculate when every assigned staff member
-        // has a review for every task
-        if (allTasksReviewed)
-        {
-            var taskAveragePoints = new List<int>();
+                    var goalTaskCodes = goalTasks
+                        .Select(t => t.TaskCode)
+                        .Where(code => !string.IsNullOrWhiteSpace(code))
+                        .ToList();
 
-            foreach (var goalTask in goalTasks)
-            {
-                var taskReviews = reviews
-                    .Where(r =>
-                        r.TaskCode == goalTask.TaskCode)
-                    .ToList();
+                    var reviews = await _context.TaskReview
+                        .Where(r =>
+                            r.TaskCode != null &&
+                            goalTaskCodes.Contains(r.TaskCode))
+                        .ToListAsync();
 
-                if (taskReviews.Count == 0)
-                    continue;
+                    bool allTasksReviewed = true;
 
-                double taskAverage = taskReviews
-                    .Average(r => r.FinalPoints);
-
-                taskAveragePoints.Add(
-                    (int)Math.Round(taskAverage)
-                );
-            }
-
-            if (taskAveragePoints.Count > 0)
-            {
-                goal.Goalpoints = CalculateGoalPoints(
-                    taskAveragePoints,
-                    goal.Priority,
-                    goal.DueDate
-                );
-
-                await _context.SaveChangesAsync();
-            }
-        }
-    }
-}
-            if (finalPoints > 0)
-            {
-                // ✅ Step 1: Get all members for this task
-                var taskMembers = await _context.TaskMembers
-                    .Where(tm => tm.TaskCode == dto.TaskCode)
-                    .ToListAsync();
-
-                if (!taskMembers.Any())
-                {
-                    Console.WriteLine("No task members found");
-                }
-
-                foreach (var member in taskMembers)
-                {
-                    if (string.IsNullOrWhiteSpace(member.Assign_To))
-                        continue;
-
-                    // ✅ Split "2-Abi" → ["2", "Abi"]
-                    var parts = member.Assign_To.Split('-');
-
-                    if (parts.Length == 0)
-                        continue;
-
-                    // ✅ Take ID part
-                    if (!long.TryParse(parts[0], out long receiverId))
+                    foreach (var goalTask in goalTasks)
                     {
-                        Console.WriteLine($"Invalid Assign_To format: {member.Assign_To}");
-                        continue;
+                        var members = await _context.TaskMembers
+                            .Where(tm =>
+                                tm.TaskCode == goalTask.TaskCode)
+                            .ToListAsync();
+
+                        foreach (var member in members)
+                        {
+                            if (string.IsNullOrWhiteSpace(
+                                member.Assign_To))
+                            {
+                                continue;
+                            }
+                            var parts = member.Assign_To
+                                .Split('-', 2);
+
+                            if (parts.Length == 0)
+                                continue;
+
+
+                            if (!int.TryParse(
+                                parts[0],
+                                out int memberStaffId))
+                            {
+                                continue;
+                            }
+
+                            bool reviewed = reviews.Any(r =>
+                                r.TaskCode == goalTask.TaskCode &&
+                                r.StaffId == memberStaffId);
+
+                            if (!reviewed)
+                            {
+                                allTasksReviewed = false;
+                                break;
+                            }
+                        }
+
+                        if (!allTasksReviewed)
+                            break;
                     }
 
-                    //_context.Notifications.Add(new Notification
-                    //{
 
-                    //    Title = "Task Score",
-                    //    Message = $"You got completed task points from manager {reviewer.Name} - {task.Task}",
-                    //    SenderId = reviewer.UserId,
-                    //    ReceiverId = receiverId, // ✅ now correct (2)
+                    if (allTasksReviewed)
+                    {
+                        var taskAveragePoints = new List<int>();
 
-                    //    RelatedId = dto.TaskCode,
-                    //    IsRead = false,
 
-                    //});
+                        foreach (var goalTask in goalTasks)
+                        {
+                            var taskReviews = reviews
+                                .Where(r =>
+                                    r.TaskCode == goalTask.TaskCode)
+                                .ToList();
+
+
+                            if (taskReviews.Count == 0)
+                                continue;
+
+                            double taskAverage = taskReviews
+                                .Average(r => r.FinalPoints);
+
+
+                            taskAveragePoints.Add(
+                                (int)Math.Round(taskAverage));
+                        }
+
+
+                        if (taskAveragePoints.Count > 0)
+                        {
+                            goal.Goalpoints = CalculateGoalPoints(
+                                taskAveragePoints,
+                                goal.Priority,
+                                goal.DueDate
+                            );
+
+                            await _context.SaveChangesAsync();
+                        }
+                    }
                 }
-
-                await _context.SaveChangesAsync();
-                }
+            }
 
             return Ok(new
             {
-                message = "Review submitted successfully",
-                systemPoints,
-                finalPoints
+                message = "Review submitted successfully.",
+
+                taskCode = dto.TaskCode,
+
+                staffId = dto.StaffId,
+
+                systemPoints = systemPoints,
+
+                finalPoints = finalPoints,
+
+                isDelayJustified = dto.IsDelayJustified,
+
+                delayReason = dto.IsDelayJustified
+                    ? dto.DelayReason
+                    : null,
+
+                comment = dto.Comment,
+
+                reviewedBy = $"{reviewer.UserId}-{reviewer.Name}"
             });
         }
 
@@ -1105,9 +1375,96 @@ namespace staff.Controllers
             }
         }
 
+        //[HttpPost("fiveSpoints")]
+        //public async Task<IActionResult> SaveWeekly5S(FiveSPoints model)
+        //{
+        //    var existing = await _context.FiveSPoints
+        //        .FirstOrDefaultAsync(x =>
+        //            x.Department == model.Department &&
+        //            x.Year == model.Year &&
+        //            x.Month == model.Month &&
+        //            x.Week == model.Week);
+
+        //    if (existing != null)
+        //    {
+        //        existing.Points = model.Points;
+        //    }
+        //    else
+        //    {
+        //        _context.FiveSPoints.Add(model);
+        //    }
+
+        //    await _context.SaveChangesAsync();
+
+        //    return Ok("Saved successfully");
+        //}
+
+
+
+        [Authorize]
         [HttpPost("fiveSpoints")]
-        public async Task<IActionResult> SaveWeekly5S(FiveSPoints model)
+        public async Task<IActionResult> SaveWeekly5S([FromBody] FiveSPoints model)
         {
+            
+
+            var userIdClaim = User.FindFirst("UserId")?.Value;
+
+            if (string.IsNullOrEmpty(userIdClaim))
+            {
+                return Unauthorized(new
+                {
+                    message = "User ID not found in token."
+                });
+            }
+
+            if (!int.TryParse(userIdClaim, out int userId))
+            {
+                return Unauthorized(new
+                {
+                    message = "Invalid User ID in token."
+                });
+            }
+
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.UserId == userId);
+
+            if (user == null)
+            {
+                return Unauthorized(new
+                {
+                    message = "User not found."
+                });
+            }
+
+            var roleName = user.Role?.Trim();
+
+            if (string.IsNullOrEmpty(roleName))
+            {
+                return Forbid();
+            }
+
+            var role = await _context.Roles
+                .FirstOrDefaultAsync(r =>
+                    r.RoleName.ToLower() == roleName.ToLower() &&
+                    r.Status == true);
+
+            if (role == null)
+            {
+                return Forbid();
+            }
+
+
+            if (!string.Equals(
+                    role.RoleName,
+                    "Auditor",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return StatusCode(403, new
+                {
+                    message = "Only Auditor can save 5S points."
+                });
+            }
+
             var existing = await _context.FiveSPoints
                 .FirstOrDefaultAsync(x =>
                     x.Department == model.Department &&
@@ -1126,7 +1483,10 @@ namespace staff.Controllers
 
             await _context.SaveChangesAsync();
 
-            return Ok("Saved successfully");
+            return Ok(new
+            {
+                message = "5S points saved successfully."
+            });
         }
 
 
@@ -1173,7 +1533,7 @@ namespace staff.Controllers
 
                     matchedExtraWork = await _context.ExtraWork.FirstOrDefaultAsync(e =>
                         e.Id == model.CompensationExtraWorkId &&
-                        e.UserId == model.SenderId &&
+                        e.StaffId == model.SenderId &&
                         e.Status == "Approved" &&
                         !e.IsCompensationUsed);
 
@@ -1370,7 +1730,7 @@ namespace staff.Controllers
                 .Where(e => compensationIds.Contains(e.Id))
                 .ToDictionaryAsync(
                     e => e.Id,
-                    e => e.WorkedDate
+                    e => e.WorkDate
                 );
 
             // =====================================================
@@ -1556,220 +1916,25 @@ namespace staff.Controllers
             return Ok("Leave day deleted successfully");
         }
 
-        [Authorize]
-        [HttpPost("extra-work")]
-        public async Task<IActionResult> AddExtraWork(
-      [FromBody] CreateExtraWorkDto dto)
-        {
-            var userIdClaim = User.FindFirst("UserId");
-
-            if (userIdClaim == null)
-                return Unauthorized("Invalid token");
-
-            int userId = int.Parse(userIdClaim.Value);
-
-            // Validate date
-            if (dto.WorkedDate.Date > DateTime.Now.Date)
-                return BadRequest("Worked date cannot be a future date.");
-
-            // Validate time
-            if (dto.EndTime <= dto.StartTime)
-                return BadRequest("End time must be greater than start time.");
-
-            // Prevent duplicate application for same date
-            var existing = await _context.ExtraWork
-                .FirstOrDefaultAsync(x =>
-                    x.UserId == userId &&
-                    x.WorkedDate.Date == dto.WorkedDate.Date &&
-                    x.Status != "Rejected");
-
-            if (existing != null)
-            {
-                return BadRequest(
-                    "You have already applied for extra work on this date.");
-            }
-
-            // Calculate total hours
-            var duration = dto.EndTime - dto.StartTime;
-
-            decimal totalHours = (decimal)duration.TotalHours;
-
-            var extraWork = new ExtraWork
-            {
-                UserId = userId,
-                WorkedDate = dto.WorkedDate.Date,
-
-                WorkType = dto.WorkType,
-
-                StartTime = dto.StartTime,
-                EndTime = dto.EndTime,
-
-                TotalHours = totalHours,
-
-                Reason = dto.Reason,
-
-                Status = "Pending",
-
-                ApprovedBy = null,
-                IsCompensationUsed = false,
-                
-            };
-
-            _context.ExtraWork.Add(extraWork);
-
-            await _context.SaveChangesAsync();
-
-            var employee = await _context.Users
-    .FirstOrDefaultAsync(u => u.UserId == userId);
-
-            var manager = await (
-           from u in _context.Users
-           join r in _context.Roles
-               on u.Role equals r.Id.ToString()
-           where u.Department == employee.Department
-                 && r.RoleName == "Manager"
-                 && r.Status == true
-           select u
-       ).FirstOrDefaultAsync();
-
-            if (manager == null)
-            {
-                Console.WriteLine(
-                    $"Manager not found for department: {employee.Department}");
-            }
-            else
-            {
-                // =====================================================
-                // SEND NOTIFICATION TO MANAGER
-                // =====================================================
-
-                if (!string.IsNullOrWhiteSpace(manager.FcmToken))
-                {
-                    try
-                    {
-                        await _firebaseNotificationService.SendNotificationAsync(
-                            manager.FcmToken,
-                            "Compensation Request",
-                            $"You received a compensation request from {employee.Name}"
-                        );
-
-                     
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"FCM Error: {ex}");
-                    }
-                }
-                else
-                {
-                    Console.WriteLine(
-                        $"Manager {manager.UserId} does not have an FCM token.");
-                }
-            }
-            return Ok(new
-            {
-                message = "Extra work application submitted successfully.",
-          
-            });
-        }
-
-
-        [Authorize]
-        [HttpGet("get-department-extra-work")]
-        public async Task<IActionResult> GetDepartmentExtraWork()
-        {
-            var userIdClaim = User.Claims
-                .FirstOrDefault(c => c.Type == "UserId")?.Value;
-
-            var roleClaim = User.Claims
-                .FirstOrDefault(c => c.Type == "Role")?.Value;
-
-            if (userIdClaim == null || roleClaim == null)
-                return Unauthorized("Invalid token");
-
-            // Role 1 = Admin
-            // Role 2 = Manager
-            if (roleClaim != "1" && roleClaim != "2")
-                return Forbid("Access denied");
-
-            if (!int.TryParse(userIdClaim, out int userId))
-                return Unauthorized("Invalid UserId");
-
-            // Get logged-in user
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.UserId == userId);
-
-            if (user == null)
-                return NotFound("User not found");
-
-            // Get extra work from same department
-            var result = await _context.ExtraWork
-                .Where(e =>
-                    _context.Users.Any(u =>
-                        u.UserId == e.UserId &&
-                        u.Department == user.Department
-                    )
-                )
-                .OrderByDescending(e => e.WorkedDate)
-                .ToListAsync();
-
-            return Ok(result);
-        }
 
         [HttpGet("available-compensation/{userId}")]
         public async Task<IActionResult> GetAvailableCompensation(int userId)
         {
             var list = await _context.ExtraWork
-                .Where(e => e.UserId == userId
+                .Where(e => e.StaffId == userId
                          && e.Status == "Approved"
-                         && !e.IsCompensationUsed)
-                .OrderBy(e => e.WorkedDate)
+                         && !e.IsCompensationUsed) 
+                .OrderBy(e => e.WorkDate)
                 .Select(e => new
                 {
                     e.Id,
-                    e.WorkedDate 
+                    e.WorkDate 
                 })
                 .ToListAsync();
 
             return Ok(list);
         }
 
-
-        [Authorize]
-        [HttpGet("get-extra-work")]
-        public async Task<IActionResult> GetExtraWork()
-        {
-            var userIdClaim = User.Claims
-                .FirstOrDefault(c => c.Type == "UserId")?.Value;
-
-            var roleClaim = User.Claims
-                .FirstOrDefault(c => c.Type == "Role")?.Value;
-
-            if (userIdClaim == null || roleClaim == null)
-                return Unauthorized("Invalid token");
-
-            if (!int.TryParse(userIdClaim, out int userId))
-                return Unauthorized("Invalid UserId");
-
-            IQueryable<ExtraWork> query = _context.ExtraWork;
-
-            // Admin / Manager
-            if (roleClaim == "1")
-            {
-                // They can see all extra work
-            }
-            else
-            {
-                // Employee sees only own
-                query = query.Where(e => e.UserId == userId);
-            }
-
-            var result = await query
-                .OrderByDescending(e => e.WorkedDate)
-                .ToListAsync();
-
-            return Ok(result);
-        }
 
         [Authorize]
         [HttpPut("approve-extra-work/{id}")]
@@ -1805,7 +1970,7 @@ namespace staff.Controllers
 
             // Get employee
             var employee = await _context.Users
-                .FirstOrDefaultAsync(u => u.UserId == extraWork.UserId);
+                .FirstOrDefaultAsync(u => u.UserId == extraWork.StaffId);
 
             if (employee == null)
                 return NotFound("Employee not found");
@@ -1823,7 +1988,7 @@ namespace staff.Controllers
 
             // Approve
             extraWork.Status = "Approved";
-            extraWork.ApprovedBy = managerId;
+            extraWork.VerifiedBy = managerId;
 
             await _context.SaveChangesAsync();
 
@@ -1870,44 +2035,59 @@ namespace staff.Controllers
                 status = extraWork.Status
             });
         }
-      
+
 
         [Authorize]
         [HttpPost("apply-permission")]
-        public async Task<IActionResult> ApplyPermission([FromBody] PermissionForm model)
+        public async Task<IActionResult> ApplyPermission(
+            [FromBody] PermissionForm model)
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
             try
             {
-                // 1. Get employee ID from JWT
+               
+
                 var userIdClaim = User.FindFirst("UserId")?.Value;
 
-                if (userIdClaim == null)
+                if (string.IsNullOrWhiteSpace(userIdClaim))
                     return Unauthorized("Invalid token");
 
-                int senderId = int.Parse(userIdClaim);
+                if (!int.TryParse(userIdClaim, out int senderId))
+                    return Unauthorized("Invalid User ID");
 
-                // 2. Get employee
                 var sender = await _context.Users
                     .FirstOrDefaultAsync(u => u.UserId == senderId);
 
                 if (sender == null)
-                    return NotFound("User not found");
+                {
+                    return NotFound(new
+                    {
+                        message = "User not found."
+                    });
+                }
 
-                // 3. Validate time
+      
                 if (model.ToTime <= model.FromTime)
-                    return BadRequest("Invalid time range");
+                {
+                    return BadRequest(new
+                    {
+                        message = "Invalid time range. ToTime must be greater than FromTime."
+                    });
+                }
 
-                // 4. Calculate requested permission minutes
-                var requestedMinutes =
+                int requestedMinutes =
                     (int)(model.ToTime - model.FromTime).TotalMinutes;
 
                 if (requestedMinutes <= 0)
-                    return BadRequest("Invalid permission duration");
-
-           
+                {
+                    return BadRequest(new
+                    {
+                        message = "Invalid permission duration."
+                    });
+                }
+         
 
                 var monthStart = new DateTime(
                     model.Date.Year,
@@ -1917,129 +2097,73 @@ namespace staff.Controllers
 
                 var nextMonth = monthStart.AddMonths(1);
 
-                // Approved + Pending permissions count
-                // Rejected permissions do NOT count
-                var usedMinutes = await _context.PermissionForm
+                var manager = await (
+                    from u in _context.Users
+                    join r in _context.Roles
+                        on u.Role equals r.Id.ToString()
+                    where u.Department == sender.Department
+                          && r.RoleName == "Manager"
+                          && r.Status == true
+                    select u
+                ).FirstOrDefaultAsync();
+
+                if (manager == null)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Manager not found for this department."
+                    });
+                }    
+
+                var usedMinutesDecimal = await _context.PermissionForm
                     .Where(p =>
                         p.SenderId == senderId &&
                         p.Date >= monthStart &&
                         p.Date < nextMonth &&
                         p.Status != "Rejected")
-                    .SumAsync(p => (decimal?)p.TotalHours * 60) ?? 0;
+                    .SumAsync(p => (decimal?)p.TotalHours * 60m) ?? 0m;
 
-                // Convert decimal to int
                 int existingPermissionMinutes =
-                    (int)Math.Round(usedMinutes);
+                    (int)Math.Round(usedMinutesDecimal);
 
-                int monthlyLimit = 60;
 
                 int totalAfterRequest =
                     existingPermissionMinutes + requestedMinutes;
 
-             
 
-                var manager = await (
-      from u in _context.Users
-      join r in _context.Roles
-          on u.Role equals r.Id.ToString()
-      where u.Department == sender.Department
-            && r.RoleName == "Manager"
-            && r.Status == true
-      select u
-  ).FirstOrDefaultAsync();
+                const int freePermissionMinutes = 60;
+                const int halfDayBlockMinutes = 240;
 
-                if (manager == null)
-                    return BadRequest("Manager not found");
+                int requiredHalfDays = 0;
 
-                if (totalAfterRequest > monthlyLimit)
+                if (totalAfterRequest > freePermissionMinutes)
                 {
-                    
-                    var leave = new LeaveForm
-                    {
-                        SenderId = senderId,
-                        ReceiverId = manager.UserId,
+                    int excessMinutes =
+                        totalAfterRequest - freePermissionMinutes;
 
-                        Name = model.Name,
-                        Designation = model.Designation,
-                        Reason = model.Reason,
-
-                        FromDate = model.Date,
-                        ToDate = model.Date,
-
-                        LeaveType = "Full Day",
-                        LeaveTyp = "LOP",
-                        ApplicationSource = "PermissionExceeded",
-                        TotalDays = 1,
-
-                        Status = "Pending",
-                        SubmittedDate = DateTime.Now,
-
-                        ApprovedDate = null,
-                        RejectionReason = null,
-
-                        ContactNumber = null
-                    };
-                    _context.LeaveForm.Add(leave);
-
-                    await _context.SaveChangesAsync();
-
-                    // Notification to manager
-                    //_context.Notifications.Add(new Notification
-                    //{
-
-                    //    Title = "Leave Request",
-                    //    Message =
-                    //        $"Permission limit exceeded. Leave request received from {model.Name}",
-
-                    //    SenderId = senderId,
-                    //    ReceiverId = (long)manager.UserId,
-
-
-                    //    RelatedId = null,
-                    //    IsRead = false,
-
-                    //});
-
-                    //await _context.SaveChangesAsync();
-
-                    if (!string.IsNullOrWhiteSpace(manager.FcmToken))
-                    {
-                        try
-                        {
-                            await _firebaseNotificationService.SendNotificationAsync(
-                                manager.FcmToken,
-                                "Permission Request",
-                                $"You received a permission limit exceeded Leave request from {model.Name}"
-                            );
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"FCM Error: {ex}");
-                        }
-                    }
-                    //.
-
-                    return Ok(new
-                    {
-                        message =
-                            "Monthly permission limit exceeded. Leave request created.",
-                        applicationType = "Leave",
-                        requestedMinutes = requestedMinutes,
-                        usedMinutes = existingPermissionMinutes,
-                        totalMinutes = totalAfterRequest,
-                        monthlyLimit = monthlyLimit,
-                        data = leave
-                    });
+                    requiredHalfDays =
+                        (int)Math.Ceiling(
+                            (double)excessMinutes /
+                            halfDayBlockMinutes
+                        );
                 }
 
-                // =====================================================
-                // 9. LIMIT NOT EXCEEDED → NORMAL PERMISSION
-                // =====================================================
 
-                var minutes = (model.ToTime - model.FromTime).TotalMinutes;
+                int existingHalfDayLeaves = await _context.LeaveForm
+                    .Where(l =>
+                        l.SenderId == senderId &&
+                        l.FromDate >= monthStart &&
+                        l.FromDate < nextMonth &&
+                        l.ApplicationSource == "PermissionExceeded" &&
+                        l.LeaveType == "Half Day" &&
+                        l.Status != "Rejected")
+                    .CountAsync();         
 
-                var hours = Math.Round(
-                    (decimal)(minutes / 60),
+                bool createHalfDay =
+                    requiredHalfDays > existingHalfDayLeaves;
+
+                decimal requestedHours = Math.Round(
+                    (decimal)requestedMinutes / 60m,
                     2
                 );
 
@@ -2053,84 +2177,157 @@ namespace staff.Controllers
                     Reason = model.Reason,
 
                     Date = model.Date,
+
                     FromTime = model.FromTime,
                     ToTime = model.ToTime,
 
-                    TotalHours = hours,
+                    TotalHours = requestedHours,
 
                     Status = "Pending",
+
                     SubmittedDate = DateTime.Now
                 };
 
                 _context.PermissionForm.Add(permission);
 
+                LeaveForm? leave = null;
+
+                if (createHalfDay)
+                {
+                    leave = new LeaveForm
+                    {
+                        SenderId = senderId,
+                        ReceiverId = manager.UserId,
+
+                        Name = model.Name,
+                        Designation = model.Designation,
+                        Reason = model.Reason,
+
+                        FromDate = model.Date,
+                        ToDate = model.Date,
+
+                        LeaveType = "Half Day",
+
+                        TotalDays = 0.5m,
+
+                        LeaveTyp = "LOP",
+
+                        ApplicationSource = "PermissionExceeded",
+
+                        Status = "Pending",
+
+                        SubmittedDate = DateTime.Now,
+
+                        ApprovedDate = null,
+                        RejectionReason = null,
+
+                        ContactNumber = null
+                    };
+
+                    _context.LeaveForm.Add(leave);
+                }
+
                 await _context.SaveChangesAsync();
 
-                // Notification
-                //_context.Notifications.Add(new Notification
-                //{
-
-                //    Title = "Permission Request",
-
-                //    Message =
-                //        $"You received a Permission request from {model.Name}",
-
-                //    SenderId = senderId,
-                //    ReceiverId = (long)manager.UserId,
-
-
-                //    RelatedId = null,
-                //    IsRead = false,
-
-                //});
-
-                //await _context.SaveChangesAsync();
                 if (!string.IsNullOrWhiteSpace(manager.FcmToken))
                 {
                     try
                     {
-                        await _firebaseNotificationService.SendNotificationAsync(
-                            manager.FcmToken,
-                            "Permission Request",
-                            $"You received a permission request from {model.Name}"
-                        );
+                        if (createHalfDay)
+                        {
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                manager.FcmToken,
+                                "Permission Request",
+                                $"You received a permission request and Half Day LOP request from {model.Name}."
+                            );
+                        }
+                        else
+                        {
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                manager.FcmToken,
+                                "Permission Request",
+                                $"You received a permission request from {model.Name}."
+                            );
+                        }
                     }
                     catch (Exception ex)
                     {
+                        // Notification failure should NOT fail the permission request.
                         Console.WriteLine($"FCM Error: {ex}");
                     }
                 }
+
                 return Ok(new
                 {
-                    message = "Permission applied successfully",
+                    message = createHalfDay
+                        ? "Permission applied successfully and Half Day LOP leave request created."
+                        : "Permission applied successfully.",
 
-                    applicationType = "Permission",
+                    applicationType = createHalfDay
+                        ? "Permission + Leave"
+                        : "Permission",
+
+                    leaveType = createHalfDay
+                        ? "Half Day"
+                        : null,
 
                     requestedMinutes = requestedMinutes,
-                    usedMinutes = existingPermissionMinutes,
-                    totalMinutes = totalAfterRequest,
-                    remainingMinutes =
-                        monthlyLimit - totalAfterRequest,
 
-                    data = permission
+                    requestedHours = requestedHours,
+
+                    previousPermissionMinutes =
+                        existingPermissionMinutes,
+
+                    previousPermissionHours =
+                        Math.Round(
+                            (decimal)existingPermissionMinutes / 60m,
+                            2
+                        ),
+
+                    totalPermissionMinutes =
+                        totalAfterRequest,
+
+                    totalPermissionHours =
+                        Math.Round(
+                            (decimal)totalAfterRequest / 60m,
+                            2
+                        ),
+
+                    freePermissionMinutes =
+                        freePermissionMinutes,
+
+                    halfDayBlockMinutes =
+                        halfDayBlockMinutes,
+
+                    requiredHalfDays =
+                        requiredHalfDays,
+
+                    existingHalfDayLeaves =
+                        existingHalfDayLeaves,
+
+                    newHalfDayCreated =
+                        createHalfDay,
+
+                    data = new
+                    {
+                        permission,
+                        leave
+                    }
                 });
             }
             catch (Exception ex)
             {
-                Console.WriteLine("=================================");
-                Console.WriteLine("APPLY PERMISSION ERROR");
-                Console.WriteLine(ex.ToString());
-                Console.WriteLine("INNER EXCEPTION:");
-                Console.WriteLine(ex.InnerException?.ToString());
-                Console.WriteLine("=================================");
+                Console.WriteLine($"ApplyPermission Error: {ex}");
 
                 return StatusCode(500, new
                 {
-                    message = ex.Message,
+                    message = "Failed to apply permission.",
+                    error = ex.Message,
                     innerException = ex.InnerException?.Message
                 });
             }
         }
+
 
         [Authorize]
         [HttpGet("get-permissions")]
@@ -2342,270 +2539,9 @@ namespace staff.Controllers
         }
 
 
-        [HttpPost("overtime-entry")]
-        public async Task<IActionResult> AddOverTime([FromBody] CreateOverTimeDto dto)
-        {
-            var fromTime = TimeSpan.Parse(dto.FromTime);
-            var toTime = TimeSpan.Parse(dto.ToTime);
-            var employee = await _context.Users
-      .FirstOrDefaultAsync(u => u.UserId == dto.Uid);
-
-            if (employee == null)
-                return NotFound("User not found");
-            var totalHours = decimal.Round((decimal)(toTime - fromTime).TotalHours,2);
-
-            var overtime = new OverTime
-            {
-                Uid = dto.Uid,
-                Dept = dto.Dept,
-                Date = dto.Date,
-
-                FromTime = fromTime,
-                ToTime = toTime,
-                Reason=dto.Reason,
-                TotalHours = totalHours,
-                isApprov = false,
-                Approved_by = ""
-            };
-
-            _context.OverTime.Add(overtime);
-            await _context.SaveChangesAsync();
-            var manager = await (
-       from u in _context.Users
-       join r in _context.Roles
-           on u.Role equals r.Id.ToString()
-       where u.Department == employee.Department
-             && r.RoleName == "Manager"
-             && r.Status == true
-       select u
-   ).FirstOrDefaultAsync();
-
-            // =====================================================
-            // SEND NOTIFICATION TO MANAGER
-            // =====================================================
-
-            if (manager != null &&
-                !string.IsNullOrWhiteSpace(manager.FcmToken))
-            {
-                try
-                {
-                    await _firebaseNotificationService.SendNotificationAsync(
-                        manager.FcmToken,
-                        "Overtime Request",
-                        $"You received an overtime request from {employee.Name}"
-                    );
-
-                    Console.WriteLine(
-                        $"Overtime notification sent to manager {manager.UserId}"
-                    );
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"FCM Error: {ex}");
-                }
-            }
-            else
-            {
-                Console.WriteLine(
-                    $"Manager not found or FCM token is empty for department {employee.Department}"
-                );
-            }
-
-            return Ok(new
-            {
-                message = "Overtime request submitted",
-                overtime.Id
-            });
-        }
-
-        [Authorize]
-        [HttpPut("overtime-approve/{id}")]
-        public async Task<IActionResult> ApproveOverTime(int id,ApproveOverTimeDto dto)
-        {
-            var userIdClaim = User.FindFirst("UserId")?.Value;
-
-            if (!int.TryParse(userIdClaim, out int userId))
-                return Unauthorized();
-
-            var currentUser = await _context.Users
-                .FirstOrDefaultAsync(x => x.UserId == userId);
-
-            if (currentUser == null)
-                return Unauthorized();
-
-            if (currentUser.Role != "2")
-                return Forbid();
-
-            var overtime = await _context.OverTime
-                .FirstOrDefaultAsync(x => x.Id == id);
-
-            if (overtime == null)
-                return NotFound("Overtime not found");
-
-            overtime.isApprov = dto.IsApproved;
-            overtime.Approved_by = currentUser.Name;
-
-            await _context.SaveChangesAsync();
-
-            var manager = await (
-      from u in _context.Users
-      join r in _context.Roles
-          on u.Role equals r.Id.ToString()
-      where u.Department == currentUser.Department
-            && r.RoleName == "Manager"
-            && r.Status == true
-      select u
-  ).FirstOrDefaultAsync();
-
-            if (currentUser != null &&
-                !string.IsNullOrWhiteSpace(currentUser.FcmToken))
-            {
-                try
-                {
-
-                    string title = overtime.isApprov == true
-                        ? "Overtime Approved"
-                        : "Overtime Rejected";
-
-                    string message = overtime.isApprov == true
-                        ? $"Your overtime request has been approved by Manager"
-                        : $"Your overtime request has been rejected by Manager";
-
-                    await _firebaseNotificationService.SendNotificationAsync(
-                        currentUser.FcmToken,
-                        title,
-                        message
-                    );
-
-                 
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"FCM Error: {ex}");
-                }
-            }
-          
-            return Ok(new
-            {
-                Message = dto.IsApproved
-                    ? "Overtime Approved"
-                    : "Overtime Rejected"
-            });
-        }
-
-        [Authorize]
-        [HttpGet("my-overtimes")]
-        public async Task<IActionResult> MyOverTimes()
-        {
-            var userIdClaim = User.FindFirst("UserId")?.Value;
-
-            if (string.IsNullOrEmpty(userIdClaim))
-                return Unauthorized();
-
-            int userId = int.Parse(userIdClaim);
-
-            var data = await (
-                from ot in _context.OverTime
-                join u in _context.Users
-                    on ot.Uid equals u.UserId
-                where ot.Uid == userId
-                orderby ot.Date descending
-                select new
-                {
-                    ot.Id,
-                    ot.Uid,
-                    Name = u.Name,
-                    ot.Dept,
-                    ot.Date,
-                    ot.FromTime,
-                    ot.ToTime,
-                    ot.TotalHours,
-                    ot.Reason,
-                    ot.Approved_by,
-                    ot.isApprov
-                }
-            ).ToListAsync();
-
-            return Ok(data);
-        }
-
-        [Authorize]
-        [HttpGet("department-overtimes")]
-        public async Task<IActionResult> DepartmentOverTimes()
-        {
-            var userIdClaim = User.FindFirst("UserId")?.Value;
-
-            if (string.IsNullOrEmpty(userIdClaim))
-                return Unauthorized();
-
-            int userId = int.Parse(userIdClaim);
-
-            var currentUser = await _context.Users
-                .FirstOrDefaultAsync(x => x.UserId == userId);
-
-            if (currentUser == null)
-                return Unauthorized();
-
-            var data = await (
-                from ot in _context.OverTime
-                join u in _context.Users
-                    on ot.Uid equals u.UserId
-                where u.Department == currentUser.Department
-                orderby ot.Date descending
-                select new
-                {
-                    ot.Id,
-                    ot.Uid,
-                    Name = u.Name,
-                    ot.Dept,
-                    ot.Date,
-                    ot.FromTime,
-                    ot.ToTime,
-                    ot.TotalHours,
-                    ot.Reason,
-                    ot.Approved_by,
-                    ot.isApprov
-                }
-            ).ToListAsync();
-
-            return Ok(data);
-        }
-
-
-        [HttpGet("getovertimes")]
-        public async Task<IActionResult> GetOverTimes()
-        {
-            var overtimes = await _context.OverTime
-                .Where(ot => ot.isApprov == true)
-                .Join(
-                    _context.Users,
-                    ot => ot.Uid,
-                    u => u.UserId,
-                    (ot, u) => new
-                    {
-                        ot.Id,
-                        ot.Uid,
-                        name = u.Name,
-                        ot.Dept,
-                        ot.Date,
-                        ot.Approved_by,
-                        ot.FromTime,
-                        ot.ToTime,
-                        ot.TotalHours,
-                        ot.Reason,
-                        ot.isApprov
-                    }
-                )
-                .OrderByDescending(x => x.Date)
-                .ToListAsync();
-
-            return Ok(overtimes);
-        }
-
         [Authorize]
         [HttpPost("punch-correction")]
-        public async Task<IActionResult> CreatePunchCorrection(
-    [FromBody] PunchCorrectionDto dto)
+        public async Task<IActionResult> CreatePunchCorrection([FromBody] PunchCorrectionDto dto)
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
@@ -2880,8 +2816,7 @@ namespace staff.Controllers
 
 
         [HttpPost("add-attitude-behaviour-score")]
-        public async Task<IActionResult> AddAttitudeBehaviourScore(
-    [FromBody] AttitudeBehaviourScoreDto model)
+        public async Task<IActionResult> AddAttitudeBehaviourScore([FromBody] AttitudeBehaviourScoreDto model)
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
@@ -3051,89 +2986,870 @@ namespace staff.Controllers
             }
         }
 
-        private int CalculateTaskScore(DateTime dueDate, DateTime? completedDate, string priority, TimeSpan? endTime, DateTime startDate)
+
+        //..............................................................................................
+
+       [Authorize]
+       [HttpPost("create_overtime")]
+       public async Task<IActionResult> CreateOvertime(CreateOvertimeDto dto)
+        {
+            // Get UserId from JWT token
+            var managerIdClaim = User.FindFirst("UserId");
+
+            if (managerIdClaim == null)
+                return Unauthorized("User ID not found in token.");
+
+            if (!int.TryParse(managerIdClaim.Value, out int managerId))
+                return Unauthorized("Invalid User ID.");
+
+            // Validate overtime time
+            if (dto.ToTime <= dto.FromTime)
+                return BadRequest("To time must be greater than From time.");
+
+            // Calculate total overtime hours
+            decimal totalHours =
+                (decimal)(dto.ToTime - dto.FromTime).TotalHours;
+
+            var overtime = new OverTime
+            {
+                // Staff receiving overtime request
+                Uid = dto.Uid,
+
+                // Staff department
+                Dept = dto.Dept,
+
+                Date = dto.Date.Date,
+
+                FromTime = dto.FromTime,
+                ToTime = dto.ToTime,
+
+                TotalHours = totalHours,
+
+                Reason = dto.Reason,
+
+                // Staff must accept/reject first
+                StaffStatus = "Pending",
+
+                // Manager approval comes after staff acceptance
+                ManagerStatus = "Pending",
+
+                StaffResponseReason = null,
+                ManagerResponseReason = null,
+
+                // Manager who created the request
+                RequestedBy = managerId,
+
+                Approved_by = null
+            };
+
+            _context.OverTime.Add(overtime);
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Overtime request sent successfully",
+                overtimeId = overtime.Id
+            });
+        }
+
+
+        [HttpPut("{id}/staff-response")]
+        public async Task<IActionResult> StaffResponse(int id,StaffOvertimeResponseDto dto)
+        {
+            var uidClaim = User.FindFirst("UserId");
+
+            if (uidClaim == null)
+                return Unauthorized("User ID not found in token.");
+
+            int uid = int.Parse(uidClaim.Value);
+
+            var overtime = await _context.OverTime
+                .FirstOrDefaultAsync(x => x.Id == id && x.Uid == uid);
+
+            if (overtime == null)
+                return NotFound("Overtime request not found.");
+
+            if (overtime.StaffStatus != "Pending")
+                return BadRequest("You have already responded to this overtime request.");
+
+            if (dto.Status != "Accepted" &&
+                dto.Status != "Rejected")
+            {
+                return BadRequest("Status must be Accepted or Rejected.");
+            }
+
+            if (dto.Status == "Rejected" &&
+                string.IsNullOrWhiteSpace(dto.Reason))
+            {
+                return BadRequest("Reason is required when rejecting overtime.");
+            }
+
+            overtime.StaffStatus = dto.Status;
+            overtime.StaffResponseReason =
+                dto.Status == "Rejected" ? dto.Reason : null;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"Overtime request {dto.Status.ToLower()} successfully"
+            });
+        }
+
+
+        [HttpPut("{id}/manager-response")]
+        public async Task<IActionResult> ManagerResponse(int id,ManagerOvertimeResponseDto dto)
+        {
+            var managerIdClaim = User.FindFirst("UserId");
+
+            if (managerIdClaim == null)
+                return Unauthorized("User ID not found in token.");
+
+            if (!int.TryParse(managerIdClaim.Value, out int managerId))
+                return Unauthorized("Invalid User ID in token.");
+
+            var overtime = await _context.OverTime
+                .FirstOrDefaultAsync(x => x.Id == id);
+
+            if (overtime == null)
+                return NotFound("Overtime request not found.");
+
+            if (overtime.RequestedBy != managerId)
+                return Forbid();
+
+            if (overtime.StaffStatus != "Accepted")
+                return BadRequest(
+                    "Manager can respond only after staff accepts the overtime request.");
+
+            if (overtime.ManagerStatus != "Pending")
+                return BadRequest("Manager has already responded.");
+
+            if (dto.Status != "Approved" &&
+                dto.Status != "Rejected")
+            {
+                return BadRequest("Status must be Approved or Rejected.");
+            }
+
+            if (dto.Status == "Rejected" &&
+                string.IsNullOrWhiteSpace(dto.Reason))
+            {
+                return BadRequest(
+                    "Reason is required when rejecting overtime.");
+            }
+
+            overtime.ManagerStatus = dto.Status;
+
+            overtime.ManagerResponseReason =
+                dto.Status == "Rejected" ? dto.Reason : null;
+
+            if (dto.Status == "Approved")
+            {
+                overtime.Approved_by = managerId;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"Overtime request {dto.Status.ToLower()} successfully"
+            });
+        }
+
+
+        [Authorize]
+        [HttpGet("department")]
+        public async Task<IActionResult> GetDepartmentOvertime()
+        {
+            var managerIdClaim = User.FindFirst("UserId");
+
+            if (managerIdClaim == null)
+                return Unauthorized("User ID not found in token.");
+
+            if (!int.TryParse(managerIdClaim.Value, out int managerId))
+                return Unauthorized("Invalid User ID.");
+
+            var manager = await _context.Users
+                .FirstOrDefaultAsync(x => x.UserId == managerId);
+
+            if (manager == null)
+                return NotFound("Manager not found.");
+
+            var overtime = await (
+                from ot in _context.OverTime
+                join staff in _context.Users
+                    on ot.Uid equals staff.UserId
+                where ot.Dept == manager.Department
+                orderby ot.Date descending
+                select new
+                {
+                    ot.Id,
+                    ot.Uid,
+
+                    // Staff details
+                    StaffName = staff.Name, // change Name if your column is DisplayName/UserName etc.
+
+                    ot.Dept,
+                    ot.Date,
+                    ot.FromTime,
+                    ot.ToTime,
+                    ot.TotalHours,
+                    ot.Reason,
+
+                    ot.StaffStatus,
+                    ot.StaffResponseReason,
+
+                    ot.ManagerStatus,
+                    ot.ManagerResponseReason,
+
+                    ot.RequestedBy,
+                    ot.Approved_by
+                }
+            ).ToListAsync();
+
+            return Ok(overtime);
+        }
+
+        [Authorize]
+        [HttpGet("my")]
+        public async Task<IActionResult> GetMyOvertime()
+        {
+            var userIdClaim = User.FindFirst("UserId");
+
+            if (userIdClaim == null)
+                return Unauthorized("User ID not found in token.");
+
+            if (!int.TryParse(userIdClaim.Value, out int uid))
+                return Unauthorized("Invalid User ID.");
+
+            var overtime = await _context.OverTime
+                .Where(x => x.Uid == uid)
+                .OrderByDescending(x => x.Date)
+                .ThenByDescending(x => x.Id)
+                .Select(x => new
+                {
+                    x.Id,
+
+                    x.Uid,
+
+                    StaffName = _context.Users
+                        .Where(u => u.UserId == x.Uid)
+                        .Select(u => u.Name)
+                        .FirstOrDefault(),
+
+                    x.Dept,
+                    x.Date,
+                    x.FromTime,
+                    x.ToTime,
+                    x.TotalHours,
+                    x.Reason,
+
+                    x.StaffStatus,
+                    x.StaffResponseReason,
+
+                    x.ManagerStatus,
+                    x.ManagerResponseReason,
+
+                    x.RequestedBy,
+                    x.Approved_by
+                })
+                .ToListAsync();
+
+            return Ok(overtime);
+        }
+
+        [Authorize]
+        [HttpPost("create-compensation")]
+        public async Task<IActionResult> CreateExtraWork(
+       [FromBody] CreateExtraWorkRequest request)
+        {
+            try
+            {
+                // Get logged-in manager ID from JWT
+                var managerIdClaim =User.FindFirst("UserId");
+
+                if (managerIdClaim == null)
+                    return Unauthorized("User ID not found in token.");
+
+                if (!int.TryParse(managerIdClaim.Value, out int managerId))
+                    return Unauthorized("Invalid User ID.");
+
+
+                var manager = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == managerId);
+
+                if (manager == null)
+                {
+                    return NotFound(new
+                    {
+                        message = "Manager not found."
+                    });
+                }
+
+                if (request.WorkDate.Date < DateTime.Today)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Work date cannot be in the past."
+                    });
+                }
+
+                if (request.EndTime <= request.StartTime)
+                {
+                    return BadRequest(new
+                    {
+                        message = "End time must be after start time."
+                    });
+                }
+
+                if (request.ExpectedHours <= 0)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Expected hours must be greater than zero."
+                    });
+                }
+
+                var extraWork = new ExtraWork
+                {
+                    ManagerId = managerId,
+
+                    StaffId = request.StaffId,
+
+                    TaskId = request.TaskId,
+
+                    WorkType = request.WorkType,
+
+                    WorkDate = request.WorkDate.Date,
+
+                    ExpectedHours = request.ExpectedHours,
+
+                    StartTime = request.StartTime,
+
+                    EndTime = request.EndTime,
+
+                    Reason = request.Reason,
+
+                    Status = "Pending",
+
+                    StaffRemarks = null,
+
+                    ManagerRemarks = null,
+
+                    VerifiedBy = null,
+
+                    IsCompensationUsed = false
+                };
+
+                _context.ExtraWork.Add(extraWork);
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = "Extra work request created successfully.",
+
+                    extraWork = new
+                    {
+                        extraWork.Id,
+                        extraWork.ManagerId,
+                        extraWork.StaffId,
+                        extraWork.TaskId,
+                        extraWork.WorkType,
+                        extraWork.WorkDate,
+                        extraWork.ExpectedHours,
+                        extraWork.StartTime,
+                        extraWork.EndTime,
+                        extraWork.Reason,
+                        extraWork.Status,
+                        extraWork.IsCompensationUsed
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Failed to create extra work request.",
+                    error = ex.Message
+                });
+            }
+        }
+
+        [Authorize]
+        [HttpGet("my-extra-work")]
+        public async Task<IActionResult> GetMyExtraWork()
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst("UserId");
+
+                if (userIdClaim == null)
+                    return Unauthorized("User ID not found in token.");
+
+                if (!int.TryParse(userIdClaim.Value, out int userId))
+                    return Unauthorized("Invalid User ID.");
+
+                var extraWorks = await _context.ExtraWork
+                    .Where(e => e.StaffId == userId)
+                    .OrderByDescending(e => e.WorkDate)
+                    .ThenByDescending(e => e.Id)
+                    .Select(e => new
+                    {
+                        e.Id,
+                        e.ManagerId,
+                        e.StaffId,
+                        e.TaskId,
+                        e.WorkType,
+                        e.WorkDate,
+                        e.ExpectedHours,
+                        e.StartTime,
+                        e.EndTime,
+                        e.Reason,
+                        e.Status,
+                        e.StaffRemarks,
+                        e.ManagerRemarks,
+                        e.VerifiedBy,
+                        e.IsCompensationUsed,
+
+                        StaffName = _context.Users
+                            .Where(u => u.UserId == e.StaffId)
+                            .Select(u => u.Name)
+                            .FirstOrDefault(),
+
+                        ManagerName = _context.Users
+                            .Where(u => u.UserId == e.ManagerId)
+                            .Select(u => u.Name)
+                            .FirstOrDefault()
+                    })
+                    .ToListAsync();
+
+                return Ok(extraWorks);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Failed to get your extra work.",
+                    error = ex.Message
+                });
+            }
+        }
+      
+       [Authorize]
+       [HttpGet("department-extra-work")]
+       public async Task<IActionResult> GetDepartmentExtraWork()
+        {
+            try
+            {
+                // 1. Get authorized user ID from JWT
+                var userIdClaim = User.FindFirst("UserId");
+
+                if (userIdClaim == null)
+                    return Unauthorized("User ID not found in token.");
+
+                if (!int.TryParse(userIdClaim.Value, out int userId))
+                    return Unauthorized("Invalid User ID.");
+
+                // 2. Get logged-in user
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == userId);
+
+                if (user == null)
+                {
+                    return NotFound(new
+                    {
+                        message = "User not found."
+                    });
+                }
+
+                // 3. Get manager department
+                var department = user.Department;
+
+                if (string.IsNullOrWhiteSpace(department))
+                {
+                    return BadRequest(new
+                    {
+                        message = "Manager department not found."
+                    });
+                }
+
+                // 4. Get all staff in manager's department
+                var staffIds = await _context.Users
+                    .Where(u => u.Department == department)
+                    .Select(u => u.UserId)
+                    .ToListAsync();
+
+                // 5. Get all ExtraWork belonging to those staff
+                var extraWorks = await _context.ExtraWork
+                    .Where(e => staffIds.Contains(e.StaffId))
+                    .OrderByDescending(e => e.WorkDate)
+                    .ThenByDescending(e => e.Id)
+                    .Select(e => new
+                    {
+                        e.Id,
+                        e.ManagerId,
+                        e.StaffId,
+
+                        // Original TaskId
+                        e.TaskId,
+
+                        // Get Task Name from Task table
+                        TaskName = _context.Tasks
+                            .Where(t => t.TaskCode == e.TaskId)
+                            .Select(t => t.Task)
+                            .FirstOrDefault(),
+
+                        e.WorkType,
+                        e.WorkDate,
+                        e.ExpectedHours,
+                        e.StartTime,
+                        e.EndTime,
+                        e.Reason,
+                        e.Status,
+                        e.StaffRemarks,
+                        e.ManagerRemarks,
+                        e.VerifiedBy,
+                        e.IsCompensationUsed,
+
+                        // Staff name
+                        StaffName = _context.Users
+                            .Where(u => u.UserId == e.StaffId)
+                            .Select(u => u.Name)
+                            .FirstOrDefault(),
+
+                        // Manager name
+                        ManagerName = _context.Users
+                            .Where(u => u.UserId == e.ManagerId)
+                            .Select(u => u.Name)
+                            .FirstOrDefault()
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    department,
+                    count = extraWorks.Count,
+                    extraWorks
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Failed to get department extra work.",
+                    error = ex.Message
+                });
+            }
+        }
+
+
+        [Authorize]
+        [HttpPut("staff-response/{id}")]
+        public async Task<IActionResult> StaffResponse(int id,[FromBody] StaffExtraWorkResponseDto request)
+        {
+            try
+            {
+                // Get logged-in user's ID from JWT
+                var userIdClaim = User.FindFirst("UserId");
+
+                if (userIdClaim == null)
+                    return Unauthorized("User ID not found in token.");
+
+                if (!int.TryParse(userIdClaim.Value, out int userId))
+                    return Unauthorized("Invalid User ID.");
+
+                // Validate status
+                if (string.IsNullOrWhiteSpace(request.Status))
+                {
+                    return BadRequest("Status is required.");
+                }
+
+                var status = request.Status.Trim();
+
+
+                // If rejected, reason is required
+                if (status == "StaffRejected" &&
+                    string.IsNullOrWhiteSpace(request.StaffRemarks))
+                {
+                    return BadRequest(
+                        "Please provide a reason for rejecting the extra work.");
+                }
+
+                // Find extra work belonging to this logged-in staff
+                var extraWork = await _context.ExtraWork
+                    .FirstOrDefaultAsync(e =>
+                        e.Id == id &&
+                        e.StaffId == userId);
+
+
+                // Update
+                extraWork.Status = status;
+                extraWork.StaffRemarks = string.IsNullOrWhiteSpace(request.StaffRemarks)
+                    ? null
+                    : request.StaffRemarks.Trim();
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = $"Extra work request {status.ToLower()} successfully.",
+                    extraWork = new
+                    {
+                        extraWork.Id,
+                        extraWork.Status,
+        
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Failed to update extra work status.",
+                    error = ex.Message
+                });
+            }
+        }
+
+        [Authorize]
+        [HttpPut("manager-response/{id}")]
+        public async Task<IActionResult> ManagerResponse(int id,[FromBody] ManagerExtraWorkResponseRequest request)
+        {
+            try
+            {
+                // Get manager ID from JWT
+                var userIdClaim = User.FindFirst("UserId");
+
+                if (userIdClaim == null)
+                    return Unauthorized("User ID not found in token.");
+
+                if (!int.TryParse(userIdClaim.Value, out int managerId))
+                    return Unauthorized("Invalid User ID.");
+
+                // Validate status
+                if (request.Status != "Approved" &&
+                    request.Status != "ManagerRejected")
+                {
+                    return BadRequest(
+                        "Status must be Approved or ManagerRejected.");
+                }
+
+                // If rejecting, reason is mandatory
+                if (request.Status == "ManagerRejected" &&
+                    string.IsNullOrWhiteSpace(request.ManagerRemarks))
+                {
+                    return BadRequest(
+                        "Manager rejection reason is required.");
+                }
+
+                // Find the extra work belonging to this manager
+                var extraWork = await _context.ExtraWork
+                    .FirstOrDefaultAsync(e =>
+                        e.Id == id &&
+                        e.ManagerId == managerId);
+
+                if (extraWork == null)
+                {
+                    return NotFound(
+                        "Extra work request not found.");
+                }
+
+                // Manager can respond only after staff accepted
+                if (extraWork.Status != "Accepted")
+                {
+                    return BadRequest(
+                        $"Cannot process this request because its current status is '{extraWork.Status}'.");
+                }
+
+                // Update status
+                extraWork.Status = request.Status;
+
+                if (request.Status == "Approved")
+                {
+                    extraWork.ManagerRemarks = null;
+                }
+                else
+                {
+                    extraWork.ManagerRemarks =
+                        request.ManagerRemarks?.Trim();
+                }
+
+                // Manager who verified/processed the request
+                extraWork.VerifiedBy = managerId;
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = request.Status == "Approved"
+                        ? "Extra work approved successfully."
+                        : "Extra work rejected successfully.",
+
+                    id = extraWork.Id,
+                    status = extraWork.Status,
+                    managerRemarks = extraWork.ManagerRemarks,
+                    verifiedBy = extraWork.VerifiedBy
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Failed to process extra work request.",
+                    error = ex.Message
+                });
+            }
+        }
+
+        //..............................................................................................
+        //   private int CalculateTaskScore(DateTime dueDate, DateTime? completedDate, string priority, TimeSpan? endTime, DateTime startDate)
+        //   {
+        //       if (completedDate == null)
+        //           return 0;
+
+        //       int timeScore;
+
+        //       if (startDate.Date == dueDate.Date &&
+        //completedDate.Value.Date == dueDate.Date)
+        //       {
+        //           if (endTime.HasValue)
+        //           {
+        //               DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
+
+        //               TimeSpan difference = completedDate.Value - dueDateTime;
+
+        //               if (difference < TimeSpan.Zero)
+        //               {
+        //                   // Completed before EndTime
+        //                   timeScore = 90;
+        //               }
+        //               else if (difference == TimeSpan.Zero)
+        //               {
+        //                   // Completed exactly at EndTime
+        //                   timeScore = 85;
+        //               }
+        //               else
+        //               {
+        //                   // Completed after EndTime
+        //                   int lateHours = (int)Math.Ceiling(
+        //                       difference.TotalHours
+        //                   );
+
+        //                   timeScore = 85 - (lateHours * 5);
+
+        //                   timeScore = Math.Max(timeScore, 50);
+        //               }
+        //           }
+        //           else
+        //           {
+
+        //               timeScore = 90;
+        //           }
+        //       }
+        //       else
+        //       {
+
+
+        //           if (endTime.HasValue)
+        //           {
+        //               DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
+
+        //               TimeSpan difference = completedDate.Value - dueDateTime;
+
+        //               if (difference < TimeSpan.Zero)
+        //               {
+        //                   timeScore = 90;
+        //               }
+        //               else if (difference == TimeSpan.Zero)
+        //               {
+        //                   timeScore = 85;
+        //               }
+        //               else
+        //               {
+        //                   int lateHours = (int)Math.Ceiling(
+        //                       difference.TotalHours
+        //                   );
+
+        //                   timeScore = 85 - (lateHours * 5);
+
+        //                   timeScore = Math.Max(timeScore, 50);
+        //               }
+        //           }
+        //           else
+        //           {
+        //               int lateDays = (completedDate.Value.Date - dueDate.Date).Days;
+
+        //               if (lateDays < 0)
+        //                   timeScore = 90;
+        //               else if (lateDays == 0)
+        //                   timeScore = 85;
+        //               else if (lateDays == 1)
+        //                   timeScore = 80;
+        //               else if (lateDays == 2)
+        //                   timeScore = 75;
+        //               else if (lateDays == 3)
+        //                   timeScore = 70;
+        //               else if (lateDays == 4)
+        //                   timeScore = 65;
+        //               else if (lateDays == 5)
+        //                   timeScore = 60;
+        //               else if (lateDays == 6)
+        //                   timeScore = 55;
+        //               else
+        //                   timeScore = 50;
+        //           }
+        //       }
+
+        //       int priorityBonus = 0;
+
+        //       switch (priority?.ToLower())
+        //       {
+        //           case "high":
+        //               priorityBonus = 5;
+        //               break;
+        //           case "medium":
+        //               priorityBonus = 3;
+        //               break;
+        //       }
+
+        //       int finalScore = timeScore + priorityBonus;
+
+        //       return Math.Clamp(finalScore,50, 90);
+        //   }
+
+        private int CalculateTaskScore(
+    DateTime dueDate,
+    DateTime? completedDate,
+    string priority,
+    TimeSpan? endTime,
+    DateTime startDate)
         {
             if (completedDate == null)
                 return 0;
 
             int timeScore;
 
-            // If EndTime is available, compare complete Date + Time
-            //if (endTime.HasValue)
-            //{
-            //    DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
-
-            //    TimeSpan difference = completedDate.Value - dueDateTime;
-
-            //    if (difference < TimeSpan.Zero)
-            //    {
-            //        // Completed before due time
-            //        timeScore = 100;
-            //    }
-            //    else if (difference == TimeSpan.Zero)
-            //    {
-            //        // Completed exactly at due time
-            //        timeScore = 95;
-            //    }
-            //    else
-            //    {
-            //        // Late
-            //        int lateHours = (int)Math.Ceiling(
-            //            difference.TotalHours
-            //        );
-
-            //        timeScore = 95 - (lateHours * 5);
-
-            //        // Minimum 50
-            //        timeScore = Math.Max(timeScore, 50);
-            //    }
-            //}
-            //else
-            //{
-            //    // No EndTime → use existing date-only calculation
-            //    int lateDays = (completedDate.Value.Date - dueDate.Date).Days;
-
-            //    if (lateDays < 0)
-            //        timeScore = 100;
-            //    else if (lateDays == 0)
-            //        timeScore = 95;
-            //    else if (lateDays == 1)
-            //        timeScore = 90;
-            //    else if (lateDays == 2)
-            //        timeScore = 85;
-            //    else if (lateDays == 3)
-            //        timeScore = 80;
-            //    else if (lateDays == 4)
-            //        timeScore = 75;
-            //    else if (lateDays == 5)
-            //        timeScore = 70;
-            //    else if (lateDays == 6)
-            //        timeScore = 65;
-            //    else if (lateDays == 7)
-            //        timeScore = 60;
-            //    else if (lateDays == 8)
-            //        timeScore = 55;
-            //    else
-            //        timeScore = 50;
-            //}
             if (startDate.Date == dueDate.Date &&
-     completedDate.Value.Date == dueDate.Date)
+                completedDate.Value.Date == dueDate.Date)
             {
                 if (endTime.HasValue)
                 {
-                    DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
+                    DateTime dueDateTime =
+                        dueDate.Date.Add(endTime.Value);
 
-                    TimeSpan difference = completedDate.Value - dueDateTime;
+                    TimeSpan difference =
+                        completedDate.Value - dueDateTime;
 
                     if (difference < TimeSpan.Zero)
                     {
                         // Completed before EndTime
-                        timeScore = 100;
+                        timeScore = 90;
                     }
                     else if (difference == TimeSpan.Zero)
                     {
                         // Completed exactly at EndTime
-                        timeScore = 95;
+                        timeScore = 85;
                     }
                     else
                     {
@@ -3142,37 +3858,34 @@ namespace staff.Controllers
                             difference.TotalHours
                         );
 
-                        timeScore = 95 - (lateHours * 5);
+                        timeScore = 85 - (lateHours * 5);
 
                         timeScore = Math.Max(timeScore, 50);
                     }
                 }
                 else
                 {
-                    // All 3 dates are same and no EndTime
-                    // No reduction
-                    timeScore = 100;
+                    // Same day and no EndTime
+                    timeScore = 90;
                 }
             }
             else
             {
-                // ============================================
-                // YOUR EXISTING CODE
-                // ============================================
-
                 if (endTime.HasValue)
                 {
-                    DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
+                    DateTime dueDateTime =
+                        dueDate.Date.Add(endTime.Value);
 
-                    TimeSpan difference = completedDate.Value - dueDateTime;
+                    TimeSpan difference =
+                        completedDate.Value - dueDateTime;
 
                     if (difference < TimeSpan.Zero)
                     {
-                        timeScore = 100;
+                        timeScore = 90;
                     }
                     else if (difference == TimeSpan.Zero)
                     {
-                        timeScore = 95;
+                        timeScore = 85;
                     }
                     else
                     {
@@ -3180,40 +3893,38 @@ namespace staff.Controllers
                             difference.TotalHours
                         );
 
-                        timeScore = 95 - (lateHours * 5);
+                        timeScore = 85 - (lateHours * 5);
 
                         timeScore = Math.Max(timeScore, 50);
                     }
                 }
                 else
                 {
-                    int lateDays = (completedDate.Value.Date - dueDate.Date).Days;
+                    int lateDays =
+                        (completedDate.Value.Date - dueDate.Date).Days;
 
                     if (lateDays < 0)
-                        timeScore = 100;
-                    else if (lateDays == 0)
-                        timeScore = 95;
-                    else if (lateDays == 1)
                         timeScore = 90;
-                    else if (lateDays == 2)
+                    else if (lateDays == 0)
                         timeScore = 85;
-                    else if (lateDays == 3)
+                    else if (lateDays == 1)
                         timeScore = 80;
-                    else if (lateDays == 4)
+                    else if (lateDays == 2)
                         timeScore = 75;
-                    else if (lateDays == 5)
+                    else if (lateDays == 3)
                         timeScore = 70;
-                    else if (lateDays == 6)
+                    else if (lateDays == 4)
                         timeScore = 65;
-                    else if (lateDays == 7)
+                    else if (lateDays == 5)
                         timeScore = 60;
-                    else if (lateDays == 8)
+                    else if (lateDays == 6)
                         timeScore = 55;
                     else
                         timeScore = 50;
                 }
             }
 
+            // Priority bonus
             int priorityBonus = 0;
 
             switch (priority?.ToLower())
@@ -3221,6 +3932,7 @@ namespace staff.Controllers
                 case "high":
                     priorityBonus = 5;
                     break;
+
                 case "medium":
                     priorityBonus = 3;
                     break;
@@ -3228,10 +3940,11 @@ namespace staff.Controllers
 
             int finalScore = timeScore + priorityBonus;
 
-            return Math.Clamp(finalScore, 0, 100);
+            // IMPORTANT:
+            // System Points maximum = 90
+            return Math.Clamp(finalScore, 50, 90);
         }
 
-       
         private int CalculateGoalPoints( List<int> taskAveragePoints,string goalPriority,DateTime? dueDate)
         {
             if (taskAveragePoints == null ||
