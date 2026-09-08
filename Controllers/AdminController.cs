@@ -2206,7 +2206,7 @@ namespace staff.Controllers
                         FromDate = model.Date,
                         ToDate = model.Date,
 
-                        LeaveType = "Half Day",
+                        LeaveType = "First Half",
 
                         TotalDays = 0.5m,
 
@@ -2268,7 +2268,7 @@ namespace staff.Controllers
                         : "Permission",
 
                     leaveType = createHalfDay
-                        ? "Half Day"
+                        ? "First Half"
                         : null,
 
                     requestedMinutes = requestedMinutes,
