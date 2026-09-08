@@ -2155,7 +2155,7 @@ namespace staff.Controllers
                         l.FromDate >= monthStart &&
                         l.FromDate < nextMonth &&
                         l.ApplicationSource == "PermissionExceeded" &&
-                        l.LeaveType == "Half Day" &&
+                        l.LeaveType == "First Half" &&
                         l.Status != "Rejected")
                     .CountAsync();         
 
