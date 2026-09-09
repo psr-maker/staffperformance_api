@@ -2,12 +2,16 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using staff;
 using staff.Services;
 using staff_work_tracking.Data;
+using StaffWork_Track.Models;
 using StaffWork_Track.Services;
 using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Mail;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -21,45 +25,49 @@ namespace staff_work_tracking.Controllers
     {
         private readonly AppDbContext _context;
         private readonly IConfiguration _config;
-        private NotificationService _notific;
+        private readonly SmtpSettings _smtpSettings;
         private readonly FirebaseNotificationService _firebaseNotificationService;
 
-        public AuthController(AppDbContext context, IConfiguration config, NotificationService notificationService, FirebaseNotificationService firebaseNotificationService)
+        public AuthController(AppDbContext context, IConfiguration config, FirebaseNotificationService firebaseNotificationService, IOptions<SmtpSettings> smtpSettings)
         {
             _context = context;
             _config = config;
-            _notific = notificationService;
             _firebaseNotificationService = firebaseNotificationService;
+            _smtpSettings = smtpSettings.Value;
         }
+
 
         [HttpPost("send-otp")]
         public async Task<IActionResult> SendOtp([FromBody] string email)
         {
-
-
             if (string.IsNullOrWhiteSpace(email))
-                return BadRequest("Name or Email is required");
+                return BadRequest("Email is required");
 
 
             var user = await _context.Users
-     .FirstOrDefaultAsync(u => u.Email == email);
+                .FirstOrDefaultAsync(u => u.Email == email);
 
-            // 1. Email not found
+            // Email not found
             if (user == null)
+            {
                 return BadRequest(new
                 {
                     message = "This email is not found"
                 });
+            }
 
-            // 2. Email exists but not active
             if (user.Status != "Active")
+            {
                 return BadRequest(new
                 {
                     message = "Your email is not approved yet, wait for director approval"
                 });
+            }
 
             var emailToSend = user.Email;
-            var otpData = await _context.otp.FirstOrDefaultAsync(o => o.Email == emailToSend);
+
+            var otpData = await _context.otp
+                .FirstOrDefaultAsync(o => o.Email == emailToSend);
 
             if (otpData != null && otpData.Resend_Count >= 3)
             {
@@ -67,33 +75,46 @@ namespace staff_work_tracking.Controllers
 
                 if (DateTime.UtcNow < cooldownTime)
                 {
-                    var remainingTime = (cooldownTime - DateTime.UtcNow).Minutes;
+                    var remainingMinutes =
+                        (int)Math.Ceiling(
+                            (cooldownTime - DateTime.UtcNow).TotalMinutes
+                        );
 
                     return BadRequest(new
                     {
-                        message = $"Maximum OTP attempts reached. Try again after {remainingTime} minutes."
+                        message =
+                            $"Maximum OTP attempts reached. Try again after {remainingMinutes} minutes."
                     });
                 }
-                else
-                {
-                    otpData.Resend_Count = 0;
-                }
+
+                // Cooldown finished
+                otpData.Resend_Count = 0;
             }
             var random = new Random();
-            string otp = random.Next(100000, 999999).ToString();
+
+            string otp = random
+                .Next(100000, 1000000)
+                .ToString();
+
             string otpHash;
+
             using (var sha = SHA256.Create())
             {
-                otpHash = Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(otp)));
+                otpHash = Convert.ToBase64String(
+                    sha.ComputeHash(
+                        Encoding.UTF8.GetBytes(otp)
+                    )
+                );
             }
+
+            var now = DateTime.UtcNow;
 
             if (otpData != null)
             {
                 otpData.OTP_Hash = otpHash;
                 otpData.Resend_Count += 1;
-
-                otpData.Created_At = DateTime.UtcNow;
-                otpData.Expire_At = DateTime.UtcNow.AddMinutes(10);
+                otpData.Created_At = now;
+                otpData.Expire_At = now.AddMinutes(10);
             }
             else
             {
@@ -101,39 +122,55 @@ namespace staff_work_tracking.Controllers
                 {
                     Email = emailToSend,
                     OTP_Hash = otpHash,
-                    Resend_Count = 0,
-                    Created_At = DateTime.UtcNow,
-                    Expire_At = DateTime.UtcNow.AddMinutes(10)
+
+                    // First OTP
+                    Resend_Count = 1,
+
+                    Created_At = now,
+                    Expire_At = now.AddMinutes(10)
                 };
+
                 _context.otp.Add(otpData);
             }
 
             await _context.SaveChangesAsync();
 
-            var mail = new System.Net.Mail.MailMessage();
-            mail.From = new System.Net.Mail.MailAddress("cloud2.poornasree@gmail.com");
-            mail.To.Add(emailToSend);
-            mail.Subject = "Your OTP Code";
-            mail.Body = $"Your OTP is {otp}. Valid for 10 minutes.";
+            using var mail = new MailMessage();
 
-            var smtp = new System.Net.Mail.SmtpClient("smtp.gmail.com", 587);
-            smtp.Credentials = new System.Net.NetworkCredential(
-                "cloud2.poornasree@gmail.com",
-                "wdhq bxuo haqk tfkg"
+            mail.From = new MailAddress(
+                _smtpSettings.Email,
+                "Poornasree"
             );
-            smtp.EnableSsl = true;
+
+            mail.To.Add(emailToSend);
+
+            mail.Subject = "Your OTP Code";
+
+            mail.Body =
+                $"Your OTP is {otp}. It is valid for 10 minutes.";
+
+            mail.IsBodyHtml = false;
+
+            using var smtp = new SmtpClient(
+                _smtpSettings.Host,
+                _smtpSettings.Port
+            );
+
+            smtp.Credentials = new NetworkCredential(
+                _smtpSettings.Email,
+                _smtpSettings.Password
+            );
+
+            smtp.EnableSsl = _smtpSettings.EnableSsl;
 
             await smtp.SendMailAsync(mail);
 
             return Ok(new
             {
                 message = "OTP sent successfully",
-                attempts = otpData?.Resend_Count ?? 1
+                attempts = otpData.Resend_Count
             });
-
         }
-
-
 
         [HttpPost("verify-otp")]
         public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtp request)

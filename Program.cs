@@ -1,13 +1,14 @@
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using staff.Services;
 using staff_work_tracking.Data;
+using StaffWork_Track.Models;
 using StaffWork_Track.Services;
-using Microsoft.AspNetCore.Http.Features;
 using System.Text;
-using FirebaseAdmin;
-using Google.Apis.Auth.OAuth2;
 
 
 FirebaseApp.Create(new AppOptions
@@ -27,6 +28,8 @@ if (string.IsNullOrEmpty(jwtKey))
 {
     throw new Exception("JWT Key is missing in appsettings.json");
 }
+builder.Services.Configure<SmtpSettings>(
+    builder.Configuration.GetSection("SmtpSettings"));
 
 builder.Services.AddAuthentication(options =>
 {
