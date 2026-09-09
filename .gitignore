@@ -1,9 +1,9 @@
 ﻿bin/
 obj/
 .vs/
-appsettings.json
-appsettings.Development.json
-publish/
+.appsettings.json
+.appsettings.Development.json
+.publish/
 *.user
 *.suo
 Firebase/firebase-service-account.json
