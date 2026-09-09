@@ -1047,7 +1047,7 @@ namespace staff.Controllers
                                 continue;
                             }
                             var parts = member.Assign_To
-                                .Split('-', 2);
+                                .Split('-', 3);
 
                             if (parts.Length == 0)
                                 continue;
@@ -1510,7 +1510,7 @@ namespace staff.Controllers
                 var manager = await _context.Users
                     .FirstOrDefaultAsync(u =>
                         u.Department == sender.Department &&
-                        u.Role == "2");
+                        u.Role == "3");
 
                 if (manager == null)
                     return BadRequest("Manager not found");
@@ -1685,7 +1685,7 @@ namespace staff.Controllers
             if (userIdClaim == null || roleClaim == null)
                 return Unauthorized("Invalid token");
 
-            if (roleClaim != "2" && roleClaim != "1")
+            if (roleClaim != "3" && roleClaim != "1")
                 return Forbid("Access denied");
 
             if (!int.TryParse(userIdClaim, out int userId))
@@ -1949,7 +1949,7 @@ namespace staff.Controllers
             if (managerIdClaim == null || roleClaim == null)
                 return Unauthorized("Invalid token");
 
-            if (roleClaim != "1" && roleClaim != "2")
+            if (roleClaim != "1" && roleClaim != "3")
                 return Forbid("Access denied");
 
             int managerId = int.Parse(managerIdClaim);
@@ -2372,7 +2372,7 @@ namespace staff.Controllers
             if (userIdClaim == null || roleClaim == null)
                 return Unauthorized("Invalid token");
 
-            if (roleClaim != "2" && roleClaim != "1")
+            if (roleClaim != "3" && roleClaim != "1")
                 return Forbid("Access denied");
 
             int userId = int.Parse(userIdClaim);
@@ -2730,7 +2730,7 @@ namespace staff.Controllers
                 return NotFound("User not found");
 
             // Only Role 2 can access department list
-            if (loggedInUser.Role != "2")
+            if (loggedInUser.Role != "3")
                 return Forbid();
 
             // Get punch corrections of all users

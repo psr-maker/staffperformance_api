@@ -59,7 +59,7 @@ namespace staff_work_tracking.Controllers
         public async Task<IActionResult> GetAllAdmins()
         {
             var admins = await _context.Users
-                .Where(u => u.Role == "2")
+                .Where(u => u.Role == "3")
                 .Select(u => new
                 {
                     u.UserId,
@@ -764,7 +764,7 @@ namespace staff_work_tracking.Controllers
 
             IQueryable<Goal> query = _context.Goal;
 
-            if (role == "2")
+            if (role == "3")
             {
                 query = query.Where(g =>
                     g.Assign_To == userId.ToString() ||

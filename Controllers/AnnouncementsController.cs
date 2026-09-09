@@ -833,7 +833,7 @@ namespace staff.Controllers
                 if (!int.TryParse(userIdClaim, out int userId))
                     return Unauthorized("Invalid token.");
 
-                if (roleClaim != "2")
+                if (roleClaim != "3")
                     return Forbid("Access denied.");
 
                 var user = await _context.Users
@@ -865,7 +865,7 @@ namespace staff.Controllers
                                 ReceiverRole = receiver.Role,
                                 ReceiverDept = receiver.Department
                             };
-             if (roleClaim == "2")
+             if (roleClaim == "3")
                 {
                
                     query = query.Where(w => w.ReceiverDept == user.Department);
