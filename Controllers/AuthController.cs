@@ -361,7 +361,7 @@ namespace staff_work_tracking.Controllers
                 {
                     u.Role,
                     RoleName = _context.Roles
-                          .Where(r => r.Id.ToString() == u.Role)
+                          .Where(r => r.Position.ToString() == u.Role)
                         .Select(r => r.RoleName)
                         .FirstOrDefault()
                 })

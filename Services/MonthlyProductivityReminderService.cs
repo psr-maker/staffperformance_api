@@ -109,7 +109,7 @@ namespace StaffWork_Track.Services
 
             var managerRole = await context.Roles
                 .FirstOrDefaultAsync(r =>
-                    r.Position == 2,
+                    r.Position == 3,
                     stoppingToken);
 
             if (managerRole == null)
