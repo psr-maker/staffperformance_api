@@ -11,7 +11,7 @@ namespace staff.Controllers
         {
             return Ok(new
             {
-                latestVersion = "1.0.1",
+                latestVersion = "1.0.2",
                 downloadUrl = "https://staff.poornasreecloud.com/downloads/workpulse.apk",
                 forceUpdate = false,
                 message = "A new version of WorkPulse is available."
