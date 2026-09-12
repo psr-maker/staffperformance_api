@@ -2419,7 +2419,128 @@ namespace staff_work_tracking.Controllers
                 });
             }
         }
+        [Authorize]
+        [HttpGet("my-department-access")]
+        public async Task<IActionResult> GetMyDepartmentAccess()
+        {
+            try
+            {
+                // ============================================
+                // 1. GET USER ID FROM JWT
+                // ============================================
 
+                var userIdClaim = User.FindFirst("UserId")?.Value;
+
+                if (string.IsNullOrWhiteSpace(userIdClaim))
+                    return Unauthorized("UserId not found in token.");
+
+                if (!int.TryParse(userIdClaim, out int userId))
+                    return Unauthorized("Invalid UserId in token.");
+
+                // ============================================
+                // 2. GET DEPARTMENT ACCESS FOR LOGGED-IN USER
+                // ============================================
+
+                var accessList = await _context.DepartmentAccess
+                    .Where(x => x.UserId == userId)
+                    .ToListAsync();
+
+                if (!accessList.Any())
+                {
+                    return Ok(new
+                    {
+                        userId = userId,
+                        message = "No department access found.",
+                        headDepartments = new List<object>()
+                    });
+                }
+
+                // ============================================
+                // 3. GET ALL REQUIRED DEPARTMENT IDs
+                // ============================================
+
+                var departmentIds = accessList
+                    .SelectMany(x => new[]
+                    {
+                x.HeadDepartmentId,
+                x.SubDepartmentId
+                    })
+                    .Distinct()
+                    .ToList();
+
+                // ============================================
+                // 4. GET DEPARTMENT DETAILS
+                // ============================================
+
+                var departments = await _context.Departments
+                    .Where(x => departmentIds.Contains(x.Id))
+                    .ToListAsync();
+
+                // ============================================
+                // 5. GROUP SUB DEPARTMENTS UNDER HEAD DEPARTMENT
+                // ============================================
+
+                var result = accessList
+                    .GroupBy(x => new
+                    {
+                        x.HeadDepartmentId,
+                        x.RoleId
+                    })
+                    .Select(group =>
+                    {
+                        var headDepartment = departments
+                            .FirstOrDefault(x => x.Id == group.Key.HeadDepartmentId);
+
+                        var subDepartments = group
+                            .Select(x => x.SubDepartmentId)
+                            .Distinct()
+                            .Select(subId =>
+                            {
+                                var department = departments
+                                    .FirstOrDefault(x => x.Id == subId);
+
+                                return new
+                                {
+                                    id = subId,
+                                    name = department?.DepartmentName
+                                };
+                            })
+                            .ToList();
+
+                        return new
+                        {
+                            roleId = group.Key.RoleId,
+
+                            headDepartment = new
+                            {
+                                id = group.Key.HeadDepartmentId,
+                                name = headDepartment?.DepartmentName
+                            },
+
+                            subDepartments = subDepartments
+                        };
+                    })
+                    .ToList();
+
+                // ============================================
+                // 6. RETURN RESPONSE
+                // ============================================
+
+                return Ok(new
+                {
+                    userId = userId,
+                    headDepartments = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while getting department access.",
+                    error = ex.Message
+                });
+            }
+        }
 
     }
 
