@@ -90,6 +90,7 @@ namespace staff_work_tracking.Controllers
                     u.UserId,
                     u.Name,
                     u.Email,
+                    u.Role,
                     u.Department,
                     u.Status,
                     u.Created_by,
@@ -129,8 +130,7 @@ namespace staff_work_tracking.Controllers
                 return NotFound("Manager not found");
 
             var totalEmployees = await _context.Users.CountAsync(u =>
-                u.Department == admin.Department &&
-                u.Role == "Staff"   
+                u.Department == admin.Department 
             );
 
           
@@ -1855,11 +1855,14 @@ namespace staff_work_tracking.Controllers
 
             if (user.Department != dto.Department)
                 AddAudit("Department", user.Department, dto.Department);
+            if (user.Role != dto.Role)
+                AddAudit("Department", user.Role, dto.Role);
 
             // ✅ Update
             user.Name = dto.Name;
             user.Email = dto.Email;
             user.Department = dto.Department;
+            user.Role = dto.Role;
 
             if (userChanged)
                 user.wasEdited = true;
@@ -2276,6 +2279,146 @@ namespace staff_work_tracking.Controllers
             });
         }
 
+
+       
+        [HttpPost("department-access")]
+        public async Task<IActionResult> AddDepartmentAccess([FromBody] DepartmentAccessRequest model)
+        {
+            try
+            {
+                // ================================
+                // VALIDATION
+                // ================================
+
+                if (model.UserId <= 0)
+                    return BadRequest("Invalid UserId.");
+
+                if (model.RoleId <= 0)
+                    return BadRequest("Invalid RoleId.");
+
+                if (model.HeadDepartmentId <= 0)
+                    return BadRequest("Invalid HeadDepartmentId.");
+
+                if (model.SubDepartmentIds == null ||
+                    !model.SubDepartmentIds.Any())
+                {
+                    return BadRequest("At least one sub department is required.");
+                }
+
+                // Remove duplicate department IDs
+                var subDepartmentIds = model.SubDepartmentIds
+                    .Distinct()
+                    .ToList();
+
+                // ================================
+                // CHECK USER
+                // ================================
+
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(x => x.UserId == model.UserId);
+
+                if (user == null)
+                    return NotFound("User not found.");
+
+                // ================================
+                // CHECK ROLE
+                // ================================
+
+                var role = await _context.Roles
+                    .FirstOrDefaultAsync(x => x.Id == model.RoleId);
+
+                if (role == null)
+                    return NotFound("Role not found.");
+
+                // ================================
+                // CHECK HEAD DEPARTMENT
+                // ================================
+
+                var headDepartment = await _context.Departments
+                    .FirstOrDefaultAsync(x => x.Id == model.HeadDepartmentId);
+
+                if (headDepartment == null)
+                    return NotFound("Head department not found.");
+
+                // ================================
+                // CHECK SUB DEPARTMENTS
+                // ================================
+
+                var existingDepartments = await _context.Departments
+                    .Where(x => subDepartmentIds.Contains(x.Id))
+                    .Select(x => x.Id)
+                    .ToListAsync();
+
+                var invalidDepartments = subDepartmentIds
+                    .Except(existingDepartments)
+                    .ToList();
+
+                if (invalidDepartments.Any())
+                {
+                    return BadRequest(new
+                    {
+                        message = "One or more sub departments do not exist.",
+                        invalidDepartmentIds = invalidDepartments
+                    });
+                }
+
+                // ================================
+                // REMOVE EXISTING ACCESS
+                // ================================
+                // This makes the request behave like
+                // "set access" rather than "add duplicates".
+
+                var existingAccess = await _context.DepartmentAccess
+                    .Where(x =>
+                        x.UserId == model.UserId &&
+                        x.HeadDepartmentId == model.HeadDepartmentId)
+                    .ToListAsync();
+
+                if (existingAccess.Any())
+                {
+                    _context.DepartmentAccess.RemoveRange(existingAccess);
+                }
+
+                // ================================
+                // ADD NEW ACCESS
+                // ================================
+
+                var newAccess = subDepartmentIds
+                    .Select(subDepartmentId => new DepartmentAccess
+                    {
+                        UserId = model.UserId,
+                        RoleId = model.RoleId,
+                        HeadDepartmentId = model.HeadDepartmentId,
+                        SubDepartmentId = subDepartmentId
+                    })
+                    .ToList();
+
+                await _context.DepartmentAccess.AddRangeAsync(newAccess);
+
+                await _context.SaveChangesAsync();
+
+                // ================================
+                // RESPONSE
+                // ================================
+
+                return Ok(new
+                {
+                    message = "Department access added successfully.",
+                    userId = model.UserId,
+                    roleId = model.RoleId,
+                    headDepartmentId = model.HeadDepartmentId,
+                    subDepartmentIds = subDepartmentIds
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while adding department access.",
+                    error = ex.Message
+                });
+            }
+        }
 
 
     }

@@ -516,7 +516,18 @@ namespace staff
 
        
     }
+    public class DepartmentAccess
+    {
+        public int Id { get; set; }
 
+        public int UserId { get; set; }
+
+        public int RoleId { get; set; }
+
+        public int HeadDepartmentId { get; set; }
+
+        public int SubDepartmentId { get; set; }
+    }
     //---------------------------------------------------------------------------------//
 
 
@@ -586,6 +597,7 @@ namespace staff
         public string Name { get; set; }
         public string Email { get; set; }
         public string Department { get; set; }
+        public string Role { get; set; }
     }
     public class ReviewTaskDto
     {
@@ -740,6 +752,16 @@ namespace staff
     {
         public string Status { get; set; } = string.Empty;
         public string? ManagerRemarks { get; set; }
+    }
+
+    public class DepartmentAccessRequest
+    {
+        public int UserId { get; set; }
+        public int RoleId { get; set; }
+
+        public int HeadDepartmentId { get; set; }
+
+        public List<int> SubDepartmentIds { get; set; } = new();
     }
 }
 

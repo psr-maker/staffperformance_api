@@ -36,6 +36,7 @@ namespace staff_work_tracking.Data
         public DbSet<ExtraWork> ExtraWork { get; set; }
         public DbSet<PunchCorrection> PunchCorrection { get; set; }
         public DbSet<AttitudeBehaviourScore> AttitudeBehaviourScore { get; set; }
+        public DbSet<DepartmentAccess> DepartmentAccess { get; set; }
 
     }
 }

@@ -1260,6 +1260,8 @@ namespace staff.Controllers
         }
 
 
+
+        //[Authorize]
         //[HttpPost("apply-leave")]
         //public async Task<IActionResult> ApplyLeave([FromBody] LeaveForm model)
         //{
@@ -1268,31 +1270,100 @@ namespace staff.Controllers
 
         //    try
         //    {
+        //        // ==============================
+        //        // 1. Get logged-in user from JWT
+        //        // ==============================
+
+        //        var userIdClaim = User.FindFirst("UserId");
+        //        var roleClaim = User.FindFirst("Role");
+
+        //        if (userIdClaim == null)
+        //            return Unauthorized("User ID not found in token.");
+
+        //        if (!int.TryParse(userIdClaim.Value, out int loggedInUserId))
+        //            return Unauthorized("Invalid User ID.");
+
+        //        if (roleClaim == null)
+        //            return Unauthorized("Role not found in token.");
+
+        //        string loggedInRole = roleClaim.Value;
+
+        //        // ==============================
+        //        // 2. Get sender
+        //        // ==============================
+
         //        var sender = await _context.Users
         //            .FirstOrDefaultAsync(u => u.UserId == model.SenderId);
 
         //        if (sender == null)
         //            return NotFound("Sender not found");
 
+        //        // ==============================
+        //        // 3. Validate date
+        //        // ==============================
+
         //        if (model.ToDate < model.FromDate)
         //            return BadRequest("Invalid date range");
 
-        //        var manager = await _context.Users
-        //            .FirstOrDefaultAsync(u =>
-        //                u.Department == sender.Department &&
-        //                u.Role == "3");
+        //        // ==============================
+        //        // 4. Determine receiver
+        //        // ==============================
 
-        //        if (manager == null)
-        //            return BadRequest("Manager not found");
+        //        int receiverId;
 
-        //        var types = model.LeaveType?.Split(',').Select(x => x.Trim()).ToList();
-        //        var categories = model.LeaveTyp?.Split(',').Select(x => x.Trim()).ToList();
+        //        if (loggedInRole == "2")
+        //        {
+        //            // =========================================
+        //            // Role 2 user applies leave for themselves
+        //            // Receiver = same person
+        //            // =========================================
 
-        //        // How many days in this request are marked "Compensation"?
-        //        int compensationDayCount = categories?.Count(c => c == "Compensation") ?? 0;
+        //            receiverId = model.SenderId;
+        //        }
+        //        else
+        //        {
+        //            // =========================================
+        //            // Other roles:
+        //            // Find manager in sender's department
+        //            // =========================================
+
+        //            var manager = await _context.Users
+        //                .FirstOrDefaultAsync(u =>
+        //                    u.Department == sender.Department &&
+        //                    u.Role == "3");
+
+        //            if (manager == null)
+        //                return BadRequest("Manager not found");
+
+        //            receiverId = manager.UserId;
+        //        }
+
+        //        // ==============================
+        //        // 5. Leave types/categories
+        //        // ==============================
+
+        //        var types = model.LeaveType?
+        //            .Split(',')
+        //            .Select(x => x.Trim())
+        //            .ToList();
+
+        //        var categories = model.LeaveTyp?
+        //            .Split(',')
+        //            .Select(x => x.Trim())
+        //            .ToList();
+
+        //        // How many days in this request are marked Compensation?
+        //        int compensationDayCount =
+        //            categories?.Count(c => c == "Compensation") ?? 0;
 
         //        if (compensationDayCount > 1)
-        //            return BadRequest("Only one Compensation day is allowed per leave request");
+        //            return BadRequest(
+        //                "Only one Compensation day is allowed per leave request"
+        //            );
+
+        //        // ==============================
+        //        // 6. Compensation validation
+        //        // ==============================
 
         //        ExtraWork? matchedExtraWork = null;
 
@@ -1301,15 +1372,22 @@ namespace staff.Controllers
         //            if (model.CompensationExtraWorkId == null)
         //                return BadRequest("Please select a compensation day");
 
-        //            matchedExtraWork = await _context.ExtraWork.FirstOrDefaultAsync(e =>
-        //                e.Id == model.CompensationExtraWorkId &&
-        //                e.StaffId == model.SenderId &&
-        //                e.Status == "Approved" &&
-        //                !e.IsCompensationUsed);
+        //            matchedExtraWork = await _context.ExtraWork
+        //                .FirstOrDefaultAsync(e =>
+        //                    e.Id == model.CompensationExtraWorkId &&
+        //                    e.StaffId == model.SenderId &&
+        //                    e.Status == "Approved" &&
+        //                    !e.IsCompensationUsed);
 
         //            if (matchedExtraWork == null)
-        //                return BadRequest("Selected compensation day is invalid or already used");
+        //                return BadRequest(
+        //                    "Selected compensation day is invalid or already used"
+        //                );
         //        }
+
+        //        // ==============================
+        //        // 7. Create leave rows
+        //        // ==============================
 
         //        DateTime currentDate = model.FromDate;
         //        int index = 0;
@@ -1320,28 +1398,46 @@ namespace staff.Controllers
         //        while (currentDate <= model.ToDate)
         //        {
         //            string type = "Full Day";
+
         //            if (types != null && index < types.Count)
         //                type = types[index];
 
         //            string category = "CL";
-        //            if (categories != null && index < categories.Count && !string.IsNullOrWhiteSpace(categories[index]))
-        //                category = categories[index];
 
-        //            decimal dayValue = type.ToLower().Contains("half") ? 0.5m : 1m;
+        //            if (categories != null &&
+        //                index < categories.Count &&
+        //                !string.IsNullOrWhiteSpace(categories[index]))
+        //            {
+        //                category = categories[index];
+        //            }
+
+        //            decimal dayValue =
+        //                type.ToLower().Contains("half")
+        //                    ? 0.5m
+        //                    : 1m;
 
         //            var leaveRow = new LeaveForm
         //            {
         //                SenderId = model.SenderId,
-        //                ReceiverId = manager.UserId,
+
+        //                // IMPORTANT:
+        //                // Role 2 => SenderId
+        //                // Other roles => ManagerId
+        //                ReceiverId = receiverId,
+
         //                Name = model.Name,
         //                Designation = model.Designation,
         //                Reason = model.Reason,
+
         //                FromDate = currentDate,
         //                ToDate = currentDate,
+
         //                LeaveTyp = category,
         //                LeaveType = type,
         //                TotalDays = dayValue,
+
         //                ContactNumber = model.ContactNumber,
+
         //                Status = "Pending",
         //                SubmittedDate = DateTime.Now,
         //                ApprovedDate = null,
@@ -1357,47 +1453,73 @@ namespace staff.Controllers
         //            index++;
         //        }
 
-        //        await _context.LeaveForm.AddRangeAsync(leaveList);
-        //        await _context.SaveChangesAsync(); // leaveList rows now have real Ids
+        //        // ==============================
+        //        // 8. Save leave
+        //        // ==============================
 
-        //        if (matchedExtraWork != null && compensationLeaveRow != null)
+        //        await _context.LeaveForm.AddRangeAsync(leaveList);
+        //        await _context.SaveChangesAsync();
+
+        //        // ==============================
+        //        // 9. Mark compensation used
+        //        // ==============================
+
+        //        if (matchedExtraWork != null &&
+        //            compensationLeaveRow != null)
         //        {
-        //            compensationLeaveRow.CompensationExtraWorkId = matchedExtraWork.Id;
+        //            compensationLeaveRow.CompensationExtraWorkId =
+        //                matchedExtraWork.Id;
+
         //            matchedExtraWork.IsCompensationUsed = true;
+
         //            await _context.SaveChangesAsync();
         //        }
 
-        //        var receiverId = manager.UserId;
+        //        // ==============================
+        //        // 10. Send notification
+        //        // ==============================
 
+        //        var receiver = await _context.Users
+        //            .FirstOrDefaultAsync(u => u.UserId == receiverId);
 
-        //        if (!string.IsNullOrWhiteSpace(manager.FcmToken))
+        //        if (receiver != null &&
+        //            !string.IsNullOrWhiteSpace(receiver.FcmToken))
         //        {
         //            try
         //            {
         //                await _firebaseNotificationService.SendNotificationAsync(
-        //                    manager.FcmToken,
+        //                    receiver.FcmToken,
         //                    "Leave Request",
         //                    $"You received a leave request from {model.Name}"
         //                );
         //            }
         //            catch (Exception ex)
         //            {
-        //                Console.WriteLine($"FCM Error: {ex.Message}");
+        //                Console.WriteLine(
+        //                    $"FCM Error: {ex.Message}"
+        //                );
         //            }
         //        }
+
+        //        // ==============================
+        //        // 11. Response
+        //        // ==============================
 
         //        return Ok(new
         //        {
         //            message = "Leave applied (split per day)",
+        //            receiverId = receiverId,
         //            data = leaveList
         //        });
         //    }
         //    catch (Exception ex)
         //    {
-        //        return StatusCode(500, ex.Message);
+        //        return StatusCode(500, new
+        //        {
+        //            message = ex.Message
+        //        });
         //    }
         //}
-
 
         [Authorize]
         [HttpPost("apply-leave")]
@@ -1405,221 +1527,223 @@ namespace staff.Controllers
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
-
             try
             {
                 // ==============================
                 // 1. Get logged-in user from JWT
                 // ==============================
-
                 var userIdClaim = User.FindFirst("UserId");
                 var roleClaim = User.FindFirst("Role");
-
                 if (userIdClaim == null)
                     return Unauthorized("User ID not found in token.");
-
                 if (!int.TryParse(userIdClaim.Value, out int loggedInUserId))
                     return Unauthorized("Invalid User ID.");
-
                 if (roleClaim == null)
                     return Unauthorized("Role not found in token.");
-
                 string loggedInRole = roleClaim.Value;
-
                 // ==============================
                 // 2. Get sender
                 // ==============================
-
                 var sender = await _context.Users
                     .FirstOrDefaultAsync(u => u.UserId == model.SenderId);
-
                 if (sender == null)
                     return NotFound("Sender not found");
-
-                // ==============================
-                // 3. Validate date
-                // ==============================
-
-                if (model.ToDate < model.FromDate)
-                    return BadRequest("Invalid date range");
-
+                string senderRole = sender.Role;
                 // ==============================
                 // 4. Determine receiver
                 // ==============================
 
                 int receiverId;
 
-                if (loggedInRole == "2")
-                {
-                    // =========================================
-                    // Role 2 user applies leave for themselves
-                    // Receiver = same person
-                    // =========================================
+                // Convert sender department to int
+                var senderDepartment = await _context.Departments
+     .FirstOrDefaultAsync(d => d.DepartmentName == sender.Department);
 
-                    receiverId = model.SenderId;
+                if (senderDepartment == null)
+                {
+                    return BadRequest(
+                        $"Department '{sender.Department}' not found."
+                    );
+                }
+
+                int senderDepartmentId = senderDepartment.Id;
+
+                // ==========================================
+                // CHECK WHETHER SENDER'S DEPARTMENT
+                // IS UNDER A DIVISION HEAD
+                // ==========================================
+
+                var divisionHeadAccess = await _context.DepartmentAccess
+                    .FirstOrDefaultAsync(x =>
+                        x.SubDepartmentId == senderDepartmentId);
+
+                if (divisionHeadAccess != null)
+                {
+                    // UserId stored in DepartmentAccess is
+                    // the Division Head who controls this department.
+
+                    var divisionHead = await _context.Users
+                        .FirstOrDefaultAsync(u =>
+                            u.UserId == divisionHeadAccess.UserId &&
+                            u.Role == divisionHeadAccess.RoleId.ToString());
+
+                    if (divisionHead != null)
+                    {
+                        receiverId = divisionHead.UserId;
+                    }
+                    else
+                    {
+                        return BadRequest(
+                            "Division Head assigned to this department was not found."
+                        );
+                    }
                 }
                 else
                 {
-                    // =========================================
-                    // Other roles:
-                    // Find manager in sender's department
-                    // =========================================
+                    // ==========================================
+                    // NO DIVISION HEAD
+                    // ==========================================
+                    //
+                    // Manager / Division Head
+                    //      ↓
+                    // Director
+                    //
+                    // Staff
+                    //      ↓
+                    // Manager
+                    //
 
-                    var manager = await _context.Users
-                        .FirstOrDefaultAsync(u =>
-                            u.Department == sender.Department &&
-                            u.Role == "3");
+                    if (senderRole == "2" || senderRole == "3")
+                    {
+                        // Manager / Division Head → Director
 
-                    if (manager == null)
-                        return BadRequest("Manager not found");
+                        var director = await _context.Users
+                            .FirstOrDefaultAsync(u => u.Role == "1");
 
-                    receiverId = manager.UserId;
+                        if (director == null)
+                            return BadRequest("Director not found.");
+
+                        receiverId = director.UserId;
+                    }
+                    else
+                    {
+                        // Normal staff → Manager
+
+                        var manager = await _context.Users
+                            .FirstOrDefaultAsync(u =>
+                                u.Department == sender.Department &&
+                                u.Role == "3");
+
+                        if (manager == null)
+                            return BadRequest("Manager not found.");
+
+                        receiverId = manager.UserId;
+                    }
                 }
-
                 // ==============================
                 // 5. Leave types/categories
                 // ==============================
-
                 var types = model.LeaveType?
                     .Split(',')
                     .Select(x => x.Trim())
                     .ToList();
-
                 var categories = model.LeaveTyp?
                     .Split(',')
                     .Select(x => x.Trim())
                     .ToList();
-
-                // How many days in this request are marked Compensation?
                 int compensationDayCount =
                     categories?.Count(c => c == "Compensation") ?? 0;
-
                 if (compensationDayCount > 1)
                     return BadRequest(
                         "Only one Compensation day is allowed per leave request"
                     );
-
                 // ==============================
                 // 6. Compensation validation
                 // ==============================
-
                 ExtraWork? matchedExtraWork = null;
-
                 if (compensationDayCount == 1)
                 {
                     if (model.CompensationExtraWorkId == null)
                         return BadRequest("Please select a compensation day");
-
                     matchedExtraWork = await _context.ExtraWork
                         .FirstOrDefaultAsync(e =>
                             e.Id == model.CompensationExtraWorkId &&
                             e.StaffId == model.SenderId &&
                             e.Status == "Approved" &&
                             !e.IsCompensationUsed);
-
                     if (matchedExtraWork == null)
                         return BadRequest(
                             "Selected compensation day is invalid or already used"
                         );
                 }
-
                 // ==============================
                 // 7. Create leave rows
                 // ==============================
-
                 DateTime currentDate = model.FromDate;
                 int index = 0;
-
                 var leaveList = new List<LeaveForm>();
                 LeaveForm? compensationLeaveRow = null;
-
                 while (currentDate <= model.ToDate)
                 {
                     string type = "Full Day";
-
                     if (types != null && index < types.Count)
                         type = types[index];
-
                     string category = "CL";
-
                     if (categories != null &&
                         index < categories.Count &&
                         !string.IsNullOrWhiteSpace(categories[index]))
                     {
                         category = categories[index];
                     }
-
                     decimal dayValue =
                         type.ToLower().Contains("half")
                             ? 0.5m
                             : 1m;
-
                     var leaveRow = new LeaveForm
                     {
                         SenderId = model.SenderId,
-
-                        // IMPORTANT:
-                        // Role 2 => SenderId
-                        // Other roles => ManagerId
                         ReceiverId = receiverId,
-
                         Name = model.Name,
                         Designation = model.Designation,
                         Reason = model.Reason,
-
                         FromDate = currentDate,
                         ToDate = currentDate,
-
                         LeaveTyp = category,
                         LeaveType = type,
                         TotalDays = dayValue,
-
                         ContactNumber = model.ContactNumber,
-
                         Status = "Pending",
                         SubmittedDate = DateTime.Now,
                         ApprovedDate = null,
                         RejectionReason = null
                     };
-
                     leaveList.Add(leaveRow);
-
                     if (category == "Compensation")
                         compensationLeaveRow = leaveRow;
-
                     currentDate = currentDate.AddDays(1);
                     index++;
                 }
-
                 // ==============================
                 // 8. Save leave
                 // ==============================
-
                 await _context.LeaveForm.AddRangeAsync(leaveList);
                 await _context.SaveChangesAsync();
-
                 // ==============================
                 // 9. Mark compensation used
                 // ==============================
-
                 if (matchedExtraWork != null &&
                     compensationLeaveRow != null)
                 {
                     compensationLeaveRow.CompensationExtraWorkId =
                         matchedExtraWork.Id;
-
                     matchedExtraWork.IsCompensationUsed = true;
-
                     await _context.SaveChangesAsync();
                 }
-
                 // ==============================
                 // 10. Send notification
                 // ==============================
-
                 var receiver = await _context.Users
                     .FirstOrDefaultAsync(u => u.UserId == receiverId);
-
                 if (receiver != null &&
                     !string.IsNullOrWhiteSpace(receiver.FcmToken))
                 {
@@ -1633,16 +1757,12 @@ namespace staff.Controllers
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine(
-                            $"FCM Error: {ex.Message}"
-                        );
+                        Console.WriteLine($"FCM Error: {ex.Message}");
                     }
                 }
-
                 // ==============================
                 // 11. Response
                 // ==============================
-
                 return Ok(new
                 {
                     message = "Leave applied (split per day)",
@@ -1659,6 +1779,85 @@ namespace staff.Controllers
             }
         }
 
+
+        [Authorize]
+        [HttpGet("leave-list")]
+        public async Task<IActionResult> GetLeaveList()
+        {
+            try
+            {
+
+                var userIdClaim = User.FindFirst("UserId");
+
+                if (userIdClaim == null)
+                    return Unauthorized("User ID not found in token.");
+
+                if (!int.TryParse(userIdClaim.Value, out int loggedInUserId))
+                    return Unauthorized("Invalid User ID.");
+                var currentUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == loggedInUserId);
+
+                if (currentUser == null)
+                    return Unauthorized("User not found.");
+
+                var leaves = await _context.LeaveForm
+                    .Where(x => x.ReceiverId == loggedInUserId)
+                    .OrderByDescending(x => x.SubmittedDate)
+                    .ToListAsync();
+
+                var senderIds = leaves
+                    .Select(x => x.SenderId)
+                    .Distinct()
+                    .ToList();
+
+                var users = await _context.Users
+                    .Where(u => senderIds.Contains(u.UserId))
+                    .ToDictionaryAsync(u => u.UserId);
+
+                var result = leaves.Select(leave =>
+                {
+                    users.TryGetValue(leave.SenderId, out var sender);
+
+                    return new
+                    {
+                        leave.Id,
+                        leave.SenderId,
+                        SenderName = sender?.Name ?? leave.Name,
+                        SenderDepartment = sender?.Department,
+                        leave.ReceiverId,
+                        leave.Designation,
+                        leave.Reason,
+                        leave.FromDate,
+                        leave.ToDate,
+                        leave.LeaveTyp,
+                        leave.LeaveType,
+                        leave.TotalDays,
+                        leave.ContactNumber,
+                        leave.Status,
+                        leave.SubmittedDate,
+                        leave.ApprovedDate,
+                        leave.RejectionReason,
+                        leave.CompensationExtraWorkId
+                    };
+                }).ToList();
+
+                return Ok(new
+                {
+                    message = "Leave list retrieved successfully.",
+                    userId = loggedInUserId,
+                    count = result.Count,
+                    data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Error retrieving leave list.",
+                    error = ex.Message
+                });
+            }
+        }
 
         [Authorize]
         [HttpGet("get-leaves")]
@@ -2418,47 +2617,151 @@ namespace staff.Controllers
                 // 4. Determine Receiver
                 // ============================================
 
+                //int receiverId;
+
+                //if (roleClaim == "2")
+                //{
+                //    // ========================================
+                //    // Role 2:
+                //    // User applies permission to themselves
+                //    // Receiver = Sender
+                //    // ========================================
+
+                //    receiverId = senderId;
+                //}
+                //else
+                //{
+                //    // ========================================
+                //    // Other roles:
+                //    // Find Manager in sender's department
+                //    // ========================================
+
+                //    var manager = await (
+                //        from u in _context.Users
+                //        join r in _context.Roles
+                //            on u.Role equals r.Id.ToString()
+                //        where u.Department == sender.Department
+                //              && r.RoleName == "Manager"
+                //              && r.Status == true
+                //        select u
+                //    ).FirstOrDefaultAsync();
+
+                //    if (manager == null)
+                //    {
+                //        return BadRequest(new
+                //        {
+                //            message =
+                //                "Manager not found for this department."
+                //        });
+                //    }
+
+                //    receiverId = manager.UserId;
+                //}
+                // ============================================
+                // 4. Determine Receiver
+                // ============================================
+
                 int receiverId;
 
-                if (roleClaim == "2")
-                {
-                    // ========================================
-                    // Role 2:
-                    // User applies permission to themselves
-                    // Receiver = Sender
-                    // ========================================
+                // ==========================================
+                // Convert sender department name to ID
+                // ==========================================
 
-                    receiverId = senderId;
+                var senderDepartment = await _context.Departments
+                    .FirstOrDefaultAsync(d =>
+                        d.DepartmentName == sender.Department);
+
+                if (senderDepartment == null)
+                {
+                    return BadRequest(
+                        $"Department '{sender.Department}' not found."
+                    );
+                }
+
+                int senderDepartmentId = senderDepartment.Id;
+
+                // ==========================================
+                // CHECK WHETHER SENDER'S DEPARTMENT
+                // IS UNDER A DIVISION HEAD
+                // ==========================================
+
+                var divisionHeadAccess = await _context.DepartmentAccess
+                    .FirstOrDefaultAsync(x =>
+                        x.SubDepartmentId == senderDepartmentId);
+
+                if (divisionHeadAccess != null)
+                {
+                    // ==========================================
+                    // Department is controlled by a Division Head
+                    // ==========================================
+
+                    var divisionHead = await _context.Users
+                        .FirstOrDefaultAsync(u =>
+                            u.UserId == divisionHeadAccess.UserId &&
+                            u.Role == divisionHeadAccess.RoleId.ToString());
+
+                    if (divisionHead == null)
+                    {
+                        return BadRequest(
+                            "Division Head assigned to this department was not found."
+                        );
+                    }
+
+                    receiverId = divisionHead.UserId;
                 }
                 else
                 {
-                    // ========================================
-                    // Other roles:
-                    // Find Manager in sender's department
-                    // ========================================
+                    // ==========================================
+                    // NO DIVISION HEAD ACCESS
+                    // ==========================================
+                    //
+                    // Manager / Division Head
+                    //          ↓
+                    //       Director
+                    //
+                    // Staff
+                    //          ↓
+                    //       Manager
+                    // ==========================================
 
-                    var manager = await (
-                        from u in _context.Users
-                        join r in _context.Roles
-                            on u.Role equals r.Id.ToString()
-                        where u.Department == sender.Department
-                              && r.RoleName == "Manager"
-                              && r.Status == true
-                        select u
-                    ).FirstOrDefaultAsync();
-
-                    if (manager == null)
+                    if (roleClaim == "2" || roleClaim == "3")
                     {
-                        return BadRequest(new
+                        // ==========================================
+                        // Manager / Division Head → Director
+                        // ==========================================
+
+                        var director = await _context.Users
+                            .FirstOrDefaultAsync(u =>
+                                u.Role == "1");
+
+                        if (director == null)
                         {
-                            message =
-                                "Manager not found for this department."
-                        });
+                            return BadRequest("Director not found.");
+                        }
+
+                        receiverId = director.UserId;
                     }
+                    else
+                    {
+                        // ==========================================
+                        // Normal Staff → Manager
+                        // ==========================================
 
-                    receiverId = manager.UserId;
+                        var manager = await _context.Users
+                            .FirstOrDefaultAsync(u =>
+                                u.Department == sender.Department &&
+                                u.Role == "3");
+
+                        if (manager == null)
+                        {
+                            return BadRequest(
+                                "Manager not found for this department."
+                            );
+                        }
+
+                        receiverId = manager.UserId;
+                    }
                 }
-
                 // ============================================
                 // 5. Month calculation
                 // ============================================
@@ -2738,6 +3041,85 @@ namespace staff.Controllers
             }
         }
 
+
+        [Authorize]
+        [HttpGet("my-received-permissions")]
+        public async Task<IActionResult> GetMyReceivedPermissions()
+        {
+            try
+            {
+                // ============================================
+                // 1. Get logged-in user ID from JWT
+                // ============================================
+
+                var userIdClaim = User.FindFirst("UserId")?.Value;
+
+                if (string.IsNullOrWhiteSpace(userIdClaim))
+                {
+                    return Unauthorized("Invalid token.");
+                }
+
+                if (!int.TryParse(userIdClaim, out int receiverId))
+                {
+                    return Unauthorized("Invalid User ID.");
+                }
+
+                // ============================================
+                // 2. Get permissions where
+                //    logged-in user is Receiver
+                // ============================================
+
+                var permissions = await _context.PermissionForm
+                    .Where(p => p.ReceiverId == receiverId)
+                    .OrderByDescending(p => p.SubmittedDate)
+                    .Select(p => new
+                    {
+                        p.Id,
+
+                        p.SenderId,
+                        p.ReceiverId,
+
+                        p.Name,
+                        p.Designation,
+                        p.Reason,
+
+                        p.Date,
+                        p.FromTime,
+                        p.ToTime,
+
+                        p.TotalHours,
+
+                        p.Status,
+                        p.SubmittedDate
+                    })
+                    .ToListAsync();
+
+                // ============================================
+                // 3. Return response
+                // ============================================
+
+                return Ok(new
+                {
+                    message = "Received permission list fetched successfully.",
+                    receiverId = receiverId,
+                    count = permissions.Count,
+                    permissions = permissions
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(
+                    $"GetMyReceivedPermissions Error: {ex}"
+                );
+
+                return StatusCode(500, new
+                {
+                    message = "Failed to fetch received permission list.",
+                    error = ex.Message,
+                    innerException = ex.InnerException?.Message
+                });
+            }
+        }
 
         [Authorize]
         [HttpGet("get-permissions")]
