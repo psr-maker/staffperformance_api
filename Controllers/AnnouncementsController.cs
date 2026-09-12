@@ -920,54 +920,7 @@ namespace staff.Controllers
 
 
 
-        private async Task SendAnnouncementNotifications(
-        long senderId,
-        string title,
-        string targetRole,
-        int announcementId)
-        {
-            var sender = await _context.Users
-                .Where(u => u.UserId == senderId)
-                .Select(u => new { u.Role, u.Name })
-                .FirstOrDefaultAsync();
-
-            if (sender == null) return;
-
-            List<int> receivers;
-
-            if (targetRole.ToLower() == "all")
-            {
-                receivers = await _context.Users
-                    .Where(u => u.UserId != senderId)
-                    .Select(u => u.UserId)
-                    .ToListAsync();
-            }
-            else
-            {
-                receivers = await _context.Users
-                    .Where(u => u.Role.ToLower() == targetRole.ToLower()
-                             && u.UserId != senderId)
-                    .Select(u => u.UserId)
-                    .ToListAsync();
-            }
-
-            foreach (var r in receivers)
-            {
-                //_context.Notifications.Add(new Notification
-                //{
-                 
-                //    Title = "New Announcement",
-                //    Message = $"{sender.Role} {sender.Name}: {title}",
-                //    SenderId = senderId,
-                //    ReceiverId = r,
-                //    RelatedId = announcementId.ToString(),
-                //    IsRead = false,
-                   
-                //});
-            }
-
-            await _context.SaveChangesAsync();
-        }
+     
 
     }
 }

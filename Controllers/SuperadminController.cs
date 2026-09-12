@@ -2279,8 +2279,6 @@ namespace staff_work_tracking.Controllers
             });
         }
 
-
-       
         [HttpPost("department-access")]
         public async Task<IActionResult> AddDepartmentAccess([FromBody] DepartmentAccessRequest model)
         {
@@ -2425,9 +2423,6 @@ namespace staff_work_tracking.Controllers
         {
             try
             {
-                // ============================================
-                // 1. GET USER ID FROM JWT
-                // ============================================
 
                 var userIdClaim = User.FindFirst("UserId")?.Value;
 
@@ -2436,10 +2431,6 @@ namespace staff_work_tracking.Controllers
 
                 if (!int.TryParse(userIdClaim, out int userId))
                     return Unauthorized("Invalid UserId in token.");
-
-                // ============================================
-                // 2. GET DEPARTMENT ACCESS FOR LOGGED-IN USER
-                // ============================================
 
                 var accessList = await _context.DepartmentAccess
                     .Where(x => x.UserId == userId)
@@ -2455,10 +2446,7 @@ namespace staff_work_tracking.Controllers
                     });
                 }
 
-                // ============================================
-                // 3. GET ALL REQUIRED DEPARTMENT IDs
-                // ============================================
-
+     
                 var departmentIds = accessList
                     .SelectMany(x => new[]
                     {
@@ -2468,17 +2456,9 @@ namespace staff_work_tracking.Controllers
                     .Distinct()
                     .ToList();
 
-                // ============================================
-                // 4. GET DEPARTMENT DETAILS
-                // ============================================
-
                 var departments = await _context.Departments
                     .Where(x => departmentIds.Contains(x.Id))
                     .ToListAsync();
-
-                // ============================================
-                // 5. GROUP SUB DEPARTMENTS UNDER HEAD DEPARTMENT
-                // ============================================
 
                 var result = accessList
                     .GroupBy(x => new
@@ -2522,10 +2502,6 @@ namespace staff_work_tracking.Controllers
                     })
                     .ToList();
 
-                // ============================================
-                // 6. RETURN RESPONSE
-                // ============================================
-
                 return Ok(new
                 {
                     userId = userId,
@@ -2537,6 +2513,146 @@ namespace staff_work_tracking.Controllers
                 return StatusCode(500, new
                 {
                     message = "An error occurred while getting department access.",
+                    error = ex.Message
+                });
+            }
+        }
+
+
+
+        [Authorize]
+        [HttpGet("my-department-auditlogs")]
+        public async Task<IActionResult> GetMyDepartmentAuditLogs()
+        {
+            try
+            {
+                // ============================================
+                // 1. GET LOGGED-IN USER ID FROM JWT
+                // ============================================
+
+                var userIdClaim = User.FindFirst("UserId")?.Value;
+
+                if (string.IsNullOrWhiteSpace(userIdClaim))
+                    return Unauthorized("UserId not found in token.");
+
+                if (!int.TryParse(userIdClaim, out int userId))
+                    return Unauthorized("Invalid UserId in token.");
+
+
+                // ============================================
+                // 2. GET DEPARTMENT ACCESS FOR LOGGED-IN USER
+                // ============================================
+
+                var accessList = await _context.DepartmentAccess
+                    .Where(x => x.UserId == userId)
+                    .ToListAsync();
+
+                if (!accessList.Any())
+                {
+                    return Ok(new
+                    {
+                        userId = userId,
+                        message = "No department access found.",
+                        auditLogs = new List<object>()
+                    });
+                }
+
+
+                // ============================================
+                // 3. GET ALL ACCESSIBLE DEPARTMENT IDS
+                // ============================================
+
+                var departmentIds = accessList
+                    .SelectMany(x => new[]
+                    {
+                x.HeadDepartmentId,
+                x.SubDepartmentId
+                    })
+                    .Distinct()
+                    .ToList();
+
+
+                // ============================================
+                // 4. GET DEPARTMENT DETAILS
+                // ============================================
+
+                var departments = await _context.Departments
+                    .Where(x => departmentIds.Contains(x.Id))
+                    .ToListAsync();
+
+
+                // ============================================
+                // 5. GET AUDIT LOGS
+                // ============================================
+                // EntityId contains Department ID
+                // EntityType identifies Department logs
+
+                var auditLogs = await _context.Auditlog
+                    .Where(x =>
+                        x.EntityType == "Department" &&
+                        departmentIds.Contains(
+                            Convert.ToInt32(x.EntityId)
+                        )
+                    )
+                    .OrderByDescending(x => x.ChangeDateandTime)
+                    .ToListAsync();
+
+
+                // ============================================
+                // 6. RETURN RESULT
+                // ============================================
+
+                var result = auditLogs.Select(log =>
+                {
+                    int departmentId = 0;
+                    int.TryParse(log.EntityId, out departmentId);
+
+                    var department = departments
+                        .FirstOrDefault(x => x.Id == departmentId);
+
+                    return new
+                    {
+                        id = log.Id,
+
+                        entityId = log.EntityId,
+
+                        entityType = log.EntityType,
+
+                        departmentId = departmentId,
+
+                        departmentName = department?.DepartmentName,
+
+                        action = log.Action,
+
+                        fieldChanged = log.Fieldchanged,
+
+                        oldValue = log.Oldvalue,
+
+                        newValue = log.Newvalue,
+
+                        editedUid = log.EditedUid,
+
+                        editedRole = log.EditedRole,
+
+                        changeDateAndTime = log.ChangeDateandTime
+                    };
+                }).ToList();
+
+
+                return Ok(new
+                {
+                    userId = userId,
+
+                    departmentIds = departmentIds,
+
+                    auditLogs = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while getting department audit logs.",
                     error = ex.Message
                 });
             }
