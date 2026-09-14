@@ -2519,16 +2519,13 @@ namespace staff_work_tracking.Controllers
         }
 
 
-
         [Authorize]
         [HttpGet("my-department-auditlogs")]
         public async Task<IActionResult> GetMyDepartmentAuditLogs()
         {
             try
             {
-                // ============================================
-                // 1. GET LOGGED-IN USER ID FROM JWT
-                // ============================================
+
 
                 var userIdClaim = User.FindFirst("UserId")?.Value;
 
@@ -2538,10 +2535,6 @@ namespace staff_work_tracking.Controllers
                 if (!int.TryParse(userIdClaim, out int userId))
                     return Unauthorized("Invalid UserId in token.");
 
-
-                // ============================================
-                // 2. GET DEPARTMENT ACCESS FOR LOGGED-IN USER
-                // ============================================
 
                 var accessList = await _context.DepartmentAccess
                     .Where(x => x.UserId == userId)
@@ -2553,14 +2546,12 @@ namespace staff_work_tracking.Controllers
                     {
                         userId = userId,
                         message = "No department access found.",
+                        departmentIds = new List<int>(),
+                        departmentNames = new List<string>(),
                         auditLogs = new List<object>()
                     });
                 }
 
-
-                // ============================================
-                // 3. GET ALL ACCESSIBLE DEPARTMENT IDS
-                // ============================================
 
                 var departmentIds = accessList
                     .SelectMany(x => new[]
@@ -2572,43 +2563,93 @@ namespace staff_work_tracking.Controllers
                     .ToList();
 
 
-                // ============================================
-                // 4. GET DEPARTMENT DETAILS
-                // ============================================
+                departmentIds = departmentIds
+                    .Where(x => x > 0)
+                    .ToList();
+
+
+                if (!departmentIds.Any())
+                {
+                    return Ok(new
+                    {
+                        userId = userId,
+                        message = "No valid department IDs found.",
+                        departmentIds = departmentIds,
+                        departmentNames = new List<string>(),
+                        auditLogs = new List<object>()
+                    });
+                }
+
 
                 var departments = await _context.Departments
-                    .Where(x => departmentIds.Contains(x.Id))
+                    .Where(d => departmentIds.Contains(d.Id))
                     .ToListAsync();
 
 
-                // ============================================
-                // 5. GET AUDIT LOGS
-                // ============================================
-                // EntityId contains Department ID
-                // EntityType identifies Department logs
+                var departmentNames = departments
+                    .Where(d => !string.IsNullOrWhiteSpace(d.DepartmentName))
+                    .Select(d => d.DepartmentName.Trim())
+                    .Distinct()
+                    .ToList();
+
+
+                if (!departmentNames.Any())
+                {
+                    return Ok(new
+                    {
+                        userId = userId,
+                        departmentIds = departmentIds,
+                        departmentNames = departmentNames,
+                        auditLogs = new List<object>()
+                    });
+                }
+
+                var departmentUsers = await _context.Users
+                    .Where(u =>
+                        u.Department != null &&
+                        departmentNames.Contains(u.Department.Trim()))
+                    .Select(u => new
+                    {
+                        u.UserId,
+                        u.Name,
+                        u.Department,
+                        u.Role
+                    })
+                    .ToListAsync();
+
+
+                var departmentUserIds = departmentUsers
+                    .Select(u => u.UserId.ToString())
+                    .Distinct()
+                    .ToList();
+
+
+                if (!departmentUserIds.Any())
+                {
+                    return Ok(new
+                    {
+                        userId = userId,
+                        departmentIds = departmentIds,
+                        departmentNames = departmentNames,
+                        departmentUsers = departmentUsers,
+                        auditLogs = new List<object>()
+                    });
+                }
+
+
 
                 var auditLogs = await _context.Auditlog
-                    .Where(x =>
-                        x.EntityType == "Department" &&
-                        departmentIds.Contains(
-                            Convert.ToInt32(x.EntityId)
-                        )
-                    )
-                    .OrderByDescending(x => x.ChangeDateandTime)
+                    .Where(log =>
+                        !string.IsNullOrEmpty(log.EditedUid) &&
+                        departmentUserIds.Contains(log.EditedUid))
+                    .OrderByDescending(log => log.ChangeDateandTime)
                     .ToListAsync();
-
-
-                // ============================================
-                // 6. RETURN RESULT
-                // ============================================
 
                 var result = auditLogs.Select(log =>
                 {
-                    int departmentId = 0;
-                    int.TryParse(log.EntityId, out departmentId);
-
-                    var department = departments
-                        .FirstOrDefault(x => x.Id == departmentId);
+                    var editedUser = departmentUsers
+                        .FirstOrDefault(u =>
+                            u.UserId.ToString() == log.EditedUid);
 
                     return new
                     {
@@ -2617,10 +2658,6 @@ namespace staff_work_tracking.Controllers
                         entityId = log.EntityId,
 
                         entityType = log.EntityType,
-
-                        departmentId = departmentId,
-
-                        departmentName = department?.DepartmentName,
 
                         action = log.Action,
 
@@ -2632,12 +2669,15 @@ namespace staff_work_tracking.Controllers
 
                         editedUid = log.EditedUid,
 
+                        editedUserName = editedUser?.Name,
+
+                        editedDepartment = editedUser?.Department,
+
                         editedRole = log.EditedRole,
 
                         changeDateAndTime = log.ChangeDateandTime
                     };
                 }).ToList();
-
 
                 return Ok(new
                 {
@@ -2645,7 +2685,13 @@ namespace staff_work_tracking.Controllers
 
                     departmentIds = departmentIds,
 
-                    auditLogs = result
+                    departmentNames = departmentNames,
+
+                    departmentUsers = departmentUsers,
+
+                    auditLogs = result,
+
+                    totalRecords = result.Count
                 });
             }
             catch (Exception ex)
@@ -2657,6 +2703,7 @@ namespace staff_work_tracking.Controllers
                 });
             }
         }
+
 
     }
 

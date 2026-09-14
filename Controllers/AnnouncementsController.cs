@@ -129,15 +129,88 @@ namespace staff.Controllers
             // SEND ANNOUNCEMENT NOTIFICATION TO TARGET ROLE
             // =====================================================
 
+            //       var targetUsers = await _context.Users
+            //.Where(u =>
+            //    !string.IsNullOrWhiteSpace(u.FcmToken) &&
+            //    (
+            //        targetRole == "All" ||
+            //        u.Role == targetRole
+            //    )
+            //)
+            //.ToListAsync();
+
+            //       foreach (var user in targetUsers)
+            //       {
+            //           try
+            //           {
+            //               await _firebaseNotificationService.SendNotificationAsync(
+            //                   user.FcmToken!,
+            //                   "New Announcement",
+            //                   title
+            //               );
+
+            //               Console.WriteLine(
+            //                   $"Announcement notification sent to {user.Name} ({user.UserId})"
+            //               );
+            //           }
+            //           catch (Exception ex)
+            //           {
+            //               Console.WriteLine(
+            //                   $"FCM Error for user {user.UserId}: {ex.Message}"
+            //               );
+            //           }
+            //       }
+
+            // =====================================================
+            // SEND ANNOUNCEMENT NOTIFICATION TO TARGET ROLE
+            // =====================================================
+
             var targetUsers = await _context.Users
-     .Where(u =>
-         !string.IsNullOrWhiteSpace(u.FcmToken) &&
-         (
-             targetRole == "All" ||
-             u.Role == targetRole
-         )
-     )
-     .ToListAsync();
+                .Where(u =>
+                    !string.IsNullOrWhiteSpace(u.FcmToken)
+                    &&
+                    (
+                        // -----------------------------------------
+                        // ALL
+                        // -----------------------------------------
+                        targetRole == "All"
+
+                        ||
+
+                        // -----------------------------------------
+                        // MANAGER (ROLE 3)
+                        // Send to Manager (3)
+                        // AND Division Head (2)
+                        // -----------------------------------------
+                        (
+                            targetRole == "3"
+                            &&
+                            (
+                                u.Role == "3" ||
+                                u.Role == "2"
+                            )
+                        )
+
+                        ||
+
+                        // -----------------------------------------
+                        // OTHER ROLES
+                        // -----------------------------------------
+                        (
+                            targetRole != "All"
+                            &&
+                            targetRole != "3"
+                            &&
+                            u.Role == targetRole
+                        )
+                    )
+                )
+                .ToListAsync();
+
+
+            // =====================================================
+            // SEND NOTIFICATION
+            // =====================================================
 
             foreach (var user in targetUsers)
             {
@@ -150,7 +223,8 @@ namespace staff.Controllers
                     );
 
                     Console.WriteLine(
-                        $"Announcement notification sent to {user.Name} ({user.UserId})"
+                        $"Announcement notification sent to " +
+                        $"{user.Name} ({user.UserId})"
                     );
                 }
                 catch (Exception ex)
