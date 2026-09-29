@@ -35,11 +35,7 @@ namespace staff.Controllers
         [Authorize]
         [HttpPost("postannouncements")]
         [RequestSizeLimit(50_000_000)]
-        public async Task<IActionResult> UploadAnnouncement(
-     [FromForm] string title,
-     [FromForm] string? description,
-     [FromForm] string targetRole,
-     IFormFile? file)
+        public async Task<IActionResult> UploadAnnouncement([FromForm] string title,[FromForm] string? description,[FromForm] string targetRole,IFormFile? file)
         {
             var userIdClaim = User.FindFirst("UserId")?.Value;
             if (userIdClaim == null)
@@ -357,10 +353,17 @@ namespace staff.Controllers
                     dto.WorkType.Trim().ToUpper();
 
                 if (workType != "IN" &&
-                    workType != "OUT")
+     workType != "OUT")
                 {
                     return BadRequest(
                         "WorkType must be IN or OUT."
+                    );
+                }
+
+                if (workType == "OUT")
+                {
+                    return BadRequest(
+                        "Check out from the existing worklog."
                     );
                 }
 
@@ -488,11 +491,173 @@ namespace staff.Controllers
                 );
             }
         }
+        [Authorize]
+        [HttpPost("checkout/{id}")]
+        [RequestSizeLimit(50_000_000)]
+        public async Task<IActionResult> CheckOut(int id,[FromForm] CheckOutWorkLogDto dto)
+        {
+            try
+            {
+                // =====================================================
+                // 1. GET LOGGED-IN USER
+                // =====================================================
+
+                var userIdClaim = User.FindFirst("UserId")?.Value;
+
+                if (userIdClaim == null)
+                    return Unauthorized("Invalid token.");
+
+                if (!int.TryParse(userIdClaim, out int userId))
+                    return Unauthorized("Invalid User ID.");
+
+
+                // =====================================================
+                // 2. FIND EXISTING WORKLOG
+                // =====================================================
+
+                var workLog = await _context.WorkLog
+                    .FirstOrDefaultAsync(w =>
+                        w.Id == id &&
+                        w.UserId == userId);
+
+                if (workLog == null)
+                {
+                    return NotFound("Worklog not found.");
+                }
+
+
+                // =====================================================
+                // 3. CHECK ALREADY CHECKED OUT
+                // =====================================================
+
+                if (!string.IsNullOrWhiteSpace(workLog.OutImageUrl))
+                {
+                    return BadRequest(
+                        "This worklog is already checked out."
+                    );
+                }
+
+
+                // =====================================================
+                // 4. VALIDATE LOCATION
+                // =====================================================
+
+                if (dto.Latitude == 0 ||
+                    dto.Longitude == 0)
+                {
+                    return BadRequest(
+                        "Location is required."
+                    );
+                }
+
+
+                // =====================================================
+                // 5. VALIDATE PHOTO
+                // =====================================================
+
+                if (dto.Image == null)
+                {
+                    return BadRequest(
+                        "Photo is required."
+                    );
+                }
+
+
+                // =====================================================
+                // 6. SAVE CHECK-OUT IMAGE
+                // =====================================================
+
+                var folder = "/var/www/uploads/worklog";
+
+                if (!Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                var extension =
+                    Path.GetExtension(dto.Image.FileName);
+
+                var fileName =
+                    $"{Guid.NewGuid()}{extension}";
+
+                var filePath =
+                    Path.Combine(folder, fileName);
+
+                using (var stream =
+                    new FileStream(
+                        filePath,
+                        FileMode.Create))
+                {
+                    await dto.Image.CopyToAsync(stream);
+                }
+
+                var imagePath =
+                    "/uploads/worklog/" + fileName;
+
+
+                // =====================================================
+                // 7. UPDATE SAME WORKLOG ROW
+                // =====================================================
+
+                workLog.OutTime = DateTime.Now;
+
+                workLog.OutLatitude =
+                    dto.Latitude;
+
+                workLog.OutLongitude =
+                    dto.Longitude;
+
+                workLog.OutLocationName =
+                    dto.LocationName;
+
+                workLog.OutImageUrl =
+                    imagePath;
+
+
+                // =====================================================
+                // 8. SAVE
+                // =====================================================
+
+                await _context.SaveChangesAsync();
+
+
+                // =====================================================
+                // 9. RESPONSE
+                // =====================================================
+
+                return Ok(new
+                {
+                    message = "Worklog checked out successfully.",
+
+                    id = workLog.Id,
+
+                    outTime = workLog.OutTime,
+
+                    outLocationName =
+                        workLog.OutLocationName,
+
+                    outImageUrl =
+                        workLog.OutImageUrl
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(
+                    500,
+                    new
+                    {
+                        message =
+                            "Error while checking out worklog.",
+
+                        error = ex.Message
+                    }
+                );
+            }
+        }
 
         [Authorize]
         [HttpGet("myworklogs")]
-        public async Task<IActionResult> GetMyWorkLogs(
-        [FromQuery] DateTime date)
+        public async Task<IActionResult> GetMyWorkLogs([FromQuery] DateTime date)
         {
             var userIdClaim = User.FindFirst("UserId")?.Value;
 
@@ -515,22 +680,28 @@ namespace staff.Controllers
                     // Actual work title
                     w.Title,
 
-                    // IN / OUT
+                    // IN
                     w.WorkType,
 
                     w.Description,
 
-                    // IN/OUT time
+                    // Check-in time
                     w.Time,
 
                     w.Status,
 
+                    // Check-in location
                     w.Latitude,
                     w.Longitude,
-
                     w.LocationName,
-
                     w.ImageUrl,
+
+                    // Check-out details
+                    w.OutTime,
+                    w.OutLatitude,
+                    w.OutLongitude,
+                    w.OutLocationName,
+                    w.OutImageUrl,
 
                     w.WorkDate
                 })
@@ -541,7 +712,7 @@ namespace staff.Controllers
 
         [Authorize]
         [HttpGet("department-worklogs")]
-        public async Task<IActionResult> GetDepartmentWorkLogs([FromQuery] DateTime? date)
+        public async Task<IActionResult> GetDepartmentWorkLogs( [FromQuery] DateTime? date)
         {
             var userIdClaim = User.FindFirst("UserId");
 
@@ -569,22 +740,28 @@ namespace staff.Controllers
                     // Work title
                     w.Title,
 
-                    // IN / OUT
+                    // IN
                     w.WorkType,
 
                     w.Description,
 
-                    // IN / OUT time
+                    // Check-in time
                     w.Time,
 
                     w.Status,
 
+                    // Check-in location
                     w.Latitude,
                     w.Longitude,
-
                     w.LocationName,
-
                     w.ImageUrl,
+
+                    // Check-out details
+                    w.OutTime,
+                    w.OutLatitude,
+                    w.OutLongitude,
+                    w.OutLocationName,
+                    w.OutImageUrl,
 
                     w.WorkDate,
 
@@ -610,49 +787,67 @@ namespace staff.Controllers
         }
 
         [HttpGet("all-worklogs")]
-        public async Task<IActionResult> GetAllWorkLogs([FromQuery] string? department,[FromQuery] DateTime? date)
+        public async Task<IActionResult> GetAllWorkLogs(
+        [FromQuery] string? department,
+        [FromQuery] DateTime? date)
         {
             var query =
                 from w in _context.WorkLog
-                join u in _context.Users 
+                join u in _context.Users
                     on w.UserId equals u.UserId
                 where w.Status == "Submitted"
                 select new
                 {
                     w.Id,
 
+                    // Staff details
+                    UserId = u.UserId,
+                    Name = u.Name,
+
                     // Actual work title
                     w.Title,
 
-                    // IN / OUT
+                    // IN
                     w.WorkType,
 
                     w.Description,
 
-                    // IN/OUT time
+                    // Check-in time
                     w.Time,
 
                     w.Status,
 
+                    // Check-in location
                     w.Latitude,
                     w.Longitude,
-
                     w.LocationName,
-
                     w.ImageUrl,
+
+                    // Check-out details
+                    w.OutTime,
+                    w.OutLatitude,
+                    w.OutLongitude,
+                    w.OutLocationName,
+                    w.OutImageUrl,
 
                     w.WorkDate,
                     w.DepartmentName
                 };
 
+            // Optional date filter
             if (date.HasValue)
             {
-                query = query.Where(w => w.WorkDate.Date == date.Value.Date);
+                query = query.Where(
+                    w => w.WorkDate.Date == date.Value.Date
+                );
             }
 
+            // Optional department filter
             if (!string.IsNullOrEmpty(department))
             {
-                query = query.Where(w => w.DepartmentName == department);
+                query = query.Where(
+                    w => w.DepartmentName == department
+                );
             }
 
             var result = await query

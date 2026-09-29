@@ -44,8 +44,11 @@ namespace staff
         [Key]
         public int Id { get; set; }
 
-        [MaxLength(10)]
         public string? GoalCode { get; set; }
+
+        public string GoalType { get; set; } 
+
+        public int? ParentGoalId { get; set; }
 
         [Required]
         public string Title { get; set; }
@@ -55,18 +58,28 @@ namespace staff
         public DateTime StartDate { get; set; }
 
         public DateTime DueDate { get; set; }
+
         public DateTime? Completed_Date { get; set; }
 
         public string? Status { get; set; }
 
-        public int Progress { get; set; }
-        public int Goalpoints { get; set; }
+        public int Progress { get; set; } = 0;
 
-        public string Assign_To { get; set; }
+        public int Goalpoints { get; set; } = 0;
+        public int? TargetQuantity { get; set; } = 0;
 
-        public string? Assign_By { get; set; }
+        public int? CompletedQuantity { get; set; } = 0;
 
-        public string? Department { get; set; }
+        public int CreatedBy { get; set; }
+    }
+    public class GoalAssignment
+    {
+        [Key]
+        public int Id { get; set; }
+
+        public int GoalId { get; set; }
+
+        public int UserId { get; set; }
     }
     public class TaskTable
     {
@@ -92,6 +105,7 @@ namespace staff
         public string PerformanceType { get; set; } = "Default";
 
         public int? Quantity { get; set; }
+        public int? CompletedQuantity { get; set; }
 
         public TimeSpan? StartTime { get; set; }
 
@@ -112,7 +126,22 @@ namespace staff
         public string Assign_By { get; set; }
         public string UserStatus { get; set; } = "Not Started";
         public DateTime Assigned_At { get; set; }
+        public int? SplitId { get; set; }
     }
+
+    public class TaskQuantitySplit
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [MaxLength(10)]
+        public string TaskCode { get; set; }
+
+        public int Quantity { get; set; }
+
+        public int CompletedQuantity { get; set; } = 0;
+    }
+
     public class Auditlog {
 
         public int Id { get; set; }
@@ -200,7 +229,12 @@ namespace staff
         public double Longitude { get; set; }
         public string LocationName { get; set; }
         public string ImageUrl { get; set; }
-       
+        public DateTime? OutTime { get; set; }
+        public double? OutLatitude { get; set; }
+        public double? OutLongitude { get; set; }
+        public string? OutLocationName { get; set; }
+        public string? OutImageUrl { get; set; }
+
     }
     public class Warning
     {
@@ -298,7 +332,6 @@ namespace staff
         public decimal Points { get; set; }
 
     }
-
     public class QualityMetrics
     {
         public int Id { get; set; }
@@ -314,7 +347,6 @@ namespace staff
         public double Points { get; set; }
 
     }
-
     public class LeaveForm
     {
         public int Id { get; set; }
@@ -341,7 +373,6 @@ namespace staff
         public string LeaveTyp { get; set; }
         public int? CompensationExtraWorkId { get; set; }
     }
-
     public class PermissionForm
     {
         public int Id { get; set; }
@@ -362,7 +393,6 @@ namespace staff
         public string? Status { get; set; }
         public DateTime? SubmittedDate { get; set; }
     }
-
     public class UserProfile
     {
         public int Id { get; set; }
@@ -388,7 +418,6 @@ namespace staff
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
     }
- 
     public class OverTime
         {
             public int Id { get; set; }
@@ -426,7 +455,6 @@ namespace staff
         // Manager who created the overtime request
         public int? RequestedBy { get; set; }
         }
-  
     public class TaskMemberRemoval
     {
         [Key]
@@ -446,7 +474,6 @@ namespace staff
 
         public bool IsPenaltyApplied { get; set; }
     }
-
     public class Roles
     {
         public int Id { get; set; }
@@ -456,7 +483,6 @@ namespace staff
 
         public bool Status { get; set; } 
     }
-
     public class ExtraWork
     {
         public int Id { get; set; }
@@ -476,7 +502,6 @@ namespace staff
         public int? VerifiedBy { get; set; }
         public bool IsCompensationUsed { get; set; }
     }
-
     public class PunchCorrection
     {
         public int Id { get; set; }
@@ -496,7 +521,6 @@ namespace staff
         public int? ApprovedById { get; set; }
 
     }
-
     public class AttitudeBehaviourScore
     {
         public int Id { get; set; }
@@ -528,6 +552,7 @@ namespace staff
 
         public int SubDepartmentId { get; set; }
     }
+  
     //---------------------------------------------------------------------------------//
 
 
@@ -550,27 +575,51 @@ namespace staff
         public int UserId { get; set; }
         public bool Approve { get; set; }
     }
+   
     public class CreateTaskDto
     {
         public string Task { get; set; }
-        public string Description { get; set; }
-        public string Priority { get; set; }
+
         public string? GoalCode { get; set; }
+
+        public string Description { get; set; }
+
+        public string Priority { get; set; }
+
         public DateTime Start_date { get; set; }
+
         public DateTime Due_Date { get; set; }
-        public List<int> AssignedToIds { get; set; } = new();
+
         public string PerformanceType { get; set; }
 
+        // Task total quantity
         public int? Quantity { get; set; }
 
         public TimeSpan? StartTime { get; set; }
 
         public TimeSpan? EndTime { get; set; }
+
+        // Users assigned to the task
+        public List<int> AssignedToIds { get; set; } = new();
+
+        // Quantity shares
+        public List<QuantitySplitDto>? QuantitySplits { get; set; }
+    }
+    public class QuantitySplitDto
+    {
+        public int Quantity { get; set; }
+
+        public List<int> MemberIds { get; set; } = new();
     }
     public class UpdateTaskStatusDto
     {
-        public string TaskCode { get; set; } = string.Empty;
-        public string Status { get; set; } = string.Empty;
+        public string TaskCode { get; set; }
+        public string Status { get; set; }
+
+        public int? CompletedQuantity { get; set; }
+
+        // Required when the task has quantity splits
+        public int? SplitId { get; set; }
     }
     public class StatusUpdateDto
     {
@@ -633,14 +682,29 @@ namespace staff
 
         public IFormFile? Image { get; set; }
     }
+    public class CheckOutWorkLogDto
+    {
+        public double Latitude { get; set; }
 
+        public double Longitude { get; set; }
+
+        public string? LocationName { get; set; }
+
+        public IFormFile? Image { get; set; }
+    }
     public class UpdateGoalDto
     {
         public string? Title { get; set; }
-        public string? Priority { get; set; }
-        public DateTime? DueDate { get; set; }
-    }
 
+        public string? Priority { get; set; }
+
+        public DateTime? DueDate { get; set; }
+
+        public int? TargetQuantity { get; set; }
+
+        // New assigned staff
+        public List<int>? AssignedUserIds { get; set; }
+    }
     public class UpdateUserProfileDto
     {
         public string? Name { get; set; }
@@ -659,14 +723,12 @@ namespace staff
         public string? ReportingManager { get; set; }
         public IFormFile? ProfileImage { get; set; }
     }
-
     public class RemoveTaskMemberDto
     {
         public int UserId { get; set; }
 
         public string? Reason { get; set; }
     }
-
     public class PunchCorrectionDto
     {
         public int UserId { get; set; }
@@ -679,13 +741,11 @@ namespace staff
 
         public string Reason { get; set; }
     }
-
     public class PunchCorrectionActionDto
     {
         public bool Approved { get; set; }
 
     }
-
     public class AttitudeBehaviourScoreDto
     {
         public int StaffId { get; set; }
@@ -698,12 +758,10 @@ namespace staff
 
         public DateTime Date { get; set; }
     }
-
     public class RegisterFcmTokenRequest
     {
         public string FcmToken { get; set; } 
     }
-
     public class CreateOvertimeDto
     {
         public int Uid { get; set; }
@@ -713,7 +771,6 @@ namespace staff
         public TimeSpan ToTime { get; set; }
         public string Reason { get; set; }
     }
-
     public class StaffOvertimeResponseDto
     {
         public string Status { get; set; }
@@ -724,7 +781,6 @@ namespace staff
         public string Status { get; set; }
         public string? Reason { get; set; }
     }
-
     public class CreateExtraWorkRequest
     {
         public int StaffId { get; set; }
@@ -753,7 +809,6 @@ namespace staff
         public string Status { get; set; } = string.Empty;
         public string? ManagerRemarks { get; set; }
     }
-
     public class DepartmentAccessRequest
     {
         public int UserId { get; set; }
@@ -763,6 +818,40 @@ namespace staff
 
         public List<int> SubDepartmentIds { get; set; } = new();
     }
+    public class CreateGoalRequest
+    {
+        public string GoalType { get; set; }
+
+        public string Title { get; set; }
+
+        public string? Priority { get; set; }
+
+        public DateTime StartDate { get; set; }
+
+        public DateTime DueDate { get; set; }
+
+        public int? TargetQuantity { get; set; }
+
+        public int? ParentGoalId { get; set; }
+
+        public List<int>? AssignedUserIds { get; set; }
+
+        public List<MonthlyGoalRequest>? MonthlyGoals { get; set; }
+    }
+    public class MonthlyGoalRequest
+    {
+        public string Title { get; set; }
+
+        public string? Priority { get; set; }
+
+        public DateTime StartDate { get; set; }
+
+        public DateTime DueDate { get; set; }
+
+        public List<int> AssignedUserIds { get; set; } = new();
+        public int? TargetQuantity { get; set; }
+    }
+   
 }
 
 

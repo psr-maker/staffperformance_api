@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using staff_work_tracking.Data;
 
@@ -11,9 +12,11 @@ using staff_work_tracking.Data;
 namespace StaffWork_Track.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260925050644_AddTaskQuantitySplits")]
+    partial class AddTaskQuantitySplits
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1111,21 +1114,6 @@ namespace StaffWork_Track.Migrations
 
                     b.Property<double>("Longitude")
                         .HasColumnType("double");
-
-                    b.Property<string>("OutImageUrl")
-                        .HasColumnType("longtext");
-
-                    b.Property<double?>("OutLatitude")
-                        .HasColumnType("double");
-
-                    b.Property<string>("OutLocationName")
-                        .HasColumnType("longtext");
-
-                    b.Property<double?>("OutLongitude")
-                        .HasColumnType("double");
-
-                    b.Property<DateTime?>("OutTime")
-                        .HasColumnType("datetime(6)");
 
                     b.Property<string>("Status")
                         .IsRequired()

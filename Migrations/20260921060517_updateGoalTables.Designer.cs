@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using staff_work_tracking.Data;
 
@@ -11,9 +12,11 @@ using staff_work_tracking.Data;
 namespace StaffWork_Track.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260921060517_updateGoalTables")]
+    partial class updateGoalTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -294,9 +297,6 @@ namespace StaffWork_Track.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("CompletedQuantity")
-                        .HasColumnType("int");
-
                     b.Property<DateTime?>("Completed_Date")
                         .HasColumnType("datetime(6)");
 
@@ -330,9 +330,6 @@ namespace StaffWork_Track.Migrations
 
                     b.Property<string>("Status")
                         .HasColumnType("longtext");
-
-                    b.Property<int?>("TargetQuantity")
-                        .HasColumnType("int");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -740,9 +737,6 @@ namespace StaffWork_Track.Migrations
                     b.Property<DateTime>("Assigned_At")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<int?>("SplitId")
-                        .HasColumnType("int");
-
                     b.Property<string>("TMCode")
                         .IsRequired()
                         .HasMaxLength(10)
@@ -797,30 +791,6 @@ namespace StaffWork_Track.Migrations
                     b.ToTable("TaskMemberRemoval");
                 });
 
-            modelBuilder.Entity("staff.TaskQuantitySplit", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("CompletedQuantity")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Quantity")
-                        .HasColumnType("int");
-
-                    b.Property<string>("TaskCode")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("varchar(10)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("TaskQuantitySplit");
-                });
-
             modelBuilder.Entity("staff.TaskReview", b =>
                 {
                     b.Property<int>("Id")
@@ -870,9 +840,6 @@ namespace StaffWork_Track.Migrations
                         .HasColumnType("int");
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("CompletedQuantity")
-                        .HasColumnType("int");
 
                     b.Property<DateTime>("Completed_Date")
                         .HasColumnType("datetime(6)");
@@ -1111,21 +1078,6 @@ namespace StaffWork_Track.Migrations
 
                     b.Property<double>("Longitude")
                         .HasColumnType("double");
-
-                    b.Property<string>("OutImageUrl")
-                        .HasColumnType("longtext");
-
-                    b.Property<double?>("OutLatitude")
-                        .HasColumnType("double");
-
-                    b.Property<string>("OutLocationName")
-                        .HasColumnType("longtext");
-
-                    b.Property<double?>("OutLongitude")
-                        .HasColumnType("double");
-
-                    b.Property<DateTime?>("OutTime")
-                        .HasColumnType("datetime(6)");
 
                     b.Property<string>("Status")
                         .IsRequired()

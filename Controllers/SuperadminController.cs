@@ -152,119 +152,323 @@ namespace staff_work_tracking.Controllers
             });
         }
 
+
         [Authorize]
         [HttpPost("Task-assign")]
         public async Task<IActionResult> CreateTask([FromBody] CreateTaskDto dto)
         {
+            // =====================================================
+            // 1. GET LOGGED-IN USER
+            // =====================================================
+
             var userIdClaim = User.FindFirst("UserId");
+
             if (userIdClaim == null)
                 return Unauthorized("Invalid token");
 
-            int assignedById = int.Parse(userIdClaim.Value);
+            if (!int.TryParse(userIdClaim.Value, out int assignedById))
+                return Unauthorized("Invalid UserId in token");
 
-            var assignedByUser = await _context.Users.FindAsync(assignedById);
+            var assignedByUser = await _context.Users
+                .FirstOrDefaultAsync(u => u.UserId == assignedById);
+
             if (assignedByUser == null)
                 return BadRequest("Assigned By user not found");
 
+
+            // =====================================================
+            // 2. VALIDATE ASSIGNED USERS
+            // =====================================================
+
+            if (dto.AssignedToIds == null || !dto.AssignedToIds.Any())
+                return BadRequest("At least one Assigned To user is required.");
+
+            var assignedUserIds = dto.AssignedToIds
+                .Distinct()
+                .ToList();
+
             var assignedToUsers = await _context.Users
-                .Where(u => dto.AssignedToIds.Contains(u.UserId))
+                .Where(u => assignedUserIds.Contains(u.UserId))
                 .ToListAsync();
 
-            if (assignedToUsers.Count != dto.AssignedToIds.Count)
-                return BadRequest("One or more Assigned To users not found");
+            if (assignedToUsers.Count != assignedUserIds.Count)
+                return BadRequest("One or more Assigned To users not found.");
 
-          
-            int nextTaskId = (await _context.Tasks.MaxAsync(t => (int?)t.Id) ?? 0) + 1;
-            var goal = await _context.Goal
-    .FirstOrDefaultAsync(g => g.GoalCode == dto.GoalCode);
+
+            // =====================================================
+            // 3. VALIDATE QUANTITY SPLITS
+            // =====================================================
+
+            if (dto.QuantitySplits != null && dto.QuantitySplits.Any())
+            {
+                // Every split must have quantity > 0
+                if (dto.QuantitySplits.Any(s => s.Quantity <= 0))
+                    return BadRequest("Share quantity must be greater than 0.");
+
+                // Every split must have at least one member
+                if (dto.QuantitySplits.Any(s =>
+                    s.MemberIds == null || !s.MemberIds.Any()))
+                {
+                    return BadRequest(
+                        "Every quantity share must have at least one member.");
+                }
+
+                // All split member IDs must belong to this task
+                var allSplitMemberIds = dto.QuantitySplits
+                    .SelectMany(s => s.MemberIds)
+                    .Distinct()
+                    .ToList();
+
+                if (allSplitMemberIds.Any(id => !assignedUserIds.Contains(id)))
+                {
+                    return BadRequest(
+                        "Quantity split contains a member who is not assigned to this task.");
+                }
+
+           
+
+                // Split total must equal task quantity
+                var splitTotal = dto.QuantitySplits.Sum(s => s.Quantity);
+
+                if (dto.Quantity.HasValue &&
+                    splitTotal != dto.Quantity.Value)
+                {
+                    return BadRequest(
+                        $"Share quantities must equal the task quantity ({dto.Quantity.Value}).");
+                }
+            }
+
+
+            // =====================================================
+            // 4. VALIDATE GOAL
+            // =====================================================
+
+            Goal? goal = null;
+
+            if (!string.IsNullOrWhiteSpace(dto.GoalCode))
+            {
+                goal = await _context.Goal
+                    .FirstOrDefaultAsync(g => g.GoalCode == dto.GoalCode);
+
+                if (goal == null)
+                    return BadRequest("Goal not found.");
+            }
+
+
+            // =====================================================
+            // 5. GENERATE TASK CODE
+            // =====================================================
+
+            int nextTaskId =
+                (await _context.Tasks.MaxAsync(t => (int?)t.Id) ?? 0) + 1;
+
+            string taskCode = "T" + nextTaskId;
+
+
+            // =====================================================
+            // 6. CREATE TASK
+            // =====================================================
+
             var task = new TaskTable
             {
-                TaskCode = "T" + nextTaskId, 
+                TaskCode = taskCode,
+
                 Task = dto.Task,
+
                 GoalCode = dto.GoalCode,
+
                 Description = dto.Description,
+
                 Priority = dto.Priority,
+
                 Status = "Not Started",
+
                 Created_At = dto.Start_date,
+
                 Due_Date = dto.Due_Date,
-              
+
                 Members = assignedToUsers.Count,
-                    PerformanceType = dto.PerformanceType,
+
+                PerformanceType = dto.PerformanceType,
+
+                // IMPORTANT:
+                // This is the TOTAL task quantity.
+                // Example: 90
                 Quantity = dto.Quantity,
+
+                // Starts from zero
+                CompletedQuantity = 0,
+
                 StartTime = dto.StartTime,
+
                 EndTime = dto.EndTime
             };
 
             _context.Tasks.Add(task);
+
             await _context.SaveChangesAsync();
 
-         
-            int lastTMId = (await _context.TaskMembers.MaxAsync(tm => (int?)tm.Id) ?? 0);
-            int tmCounter = lastTMId + 1;
+
+            // =====================================================
+            // 7. CREATE TASK MEMBERS
+            // =====================================================
+
+            int tmCounter =
+                (await _context.TaskMembers.MaxAsync(tm => (int?)tm.Id) ?? 0) + 1;
+
+            var createdMembers = new List<TaskMember>();
 
             foreach (var user in assignedToUsers)
             {
                 var member = new TaskMember
                 {
-                    TMCode = "TM" + tmCounter++,   
+                    TMCode = "TM" + tmCounter++,
+
                     TaskCode = task.TaskCode,
-                    Assign_To = $"{user.UserId}-{user.Name}",
-                    Assign_By = $"{assignedByUser.UserId}-{assignedByUser.Name}",
+
+                    Assign_To =
+                        $"{user.UserId}-{user.Name}",
+
+                    Assign_By =
+                        $"{assignedByUser.UserId}-{assignedByUser.Name}",
+
                     UserStatus = "Not Started",
-                    Assigned_At = DateTime.Now
+
+                    Assigned_At = DateTime.Now,
+
+                    // Will be assigned below
+                    SplitId = null
                 };
 
                 _context.TaskMembers.Add(member);
+
+                createdMembers.Add(member);
             }
-            if (!string.IsNullOrEmpty(task.GoalCode))
-            {
-                var goalData = await _context.Goal
-                    .FirstOrDefaultAsync(g => g.GoalCode == task.GoalCode);
 
-                if (goalData != null)
-                {
-                    var goalTasks = await _context.Tasks
-                        .Where(t => t.GoalCode == goalData.GoalCode)
-                        .ToListAsync();
-
-                    int total = goalTasks.Count;
-
-                    int completed = goalTasks.Count(t =>
-                        !string.IsNullOrEmpty(t.Status) &&
-                        t.Status.Trim().ToLower() == "completed"
-                    );
-
-                    int notStarted = goalTasks.Count(t =>
-                        !string.IsNullOrEmpty(t.Status) &&
-                        t.Status.Trim().ToLower() == "not started"
-                    );
-
-                    // ✅ FIX: Update Status ALSO
-                    if (completed == total)
-                    {
-                        goalData.Status = "completed";
-                        goalData.Completed_Date = DateTime.Now;
-                    }
-                    else if (notStarted == total)
-                    {
-                        goalData.Status = "not started";
-                        goalData.Completed_Date = null;
-                    }
-                    else
-                    {
-                        goalData.Status = "inprogress";
-                        goalData.Completed_Date = null;
-                    }
-
-                    goalData.Progress = total == 0 ? 0 : (int)(((double)completed / total) * 100);
-
-                    await _context.SaveChangesAsync();
-                }
-            }
-          
+            // Save members so they are tracked properly
             await _context.SaveChangesAsync();
+
+
             // =====================================================
-            // SEND TASK ASSIGNED NOTIFICATION
+            // 8. CREATE QUANTITY SHARES
+            // =====================================================
+
+            var splitResponse = new List<object>();
+
+            if (dto.QuantitySplits != null &&
+                dto.QuantitySplits.Any())
+            {
+                foreach (var split in dto.QuantitySplits)
+                {
+                    // ---------------------------------------------
+                    // Create one share
+                    // ---------------------------------------------
+
+                    var row = new TaskQuantitySplit
+                    {
+                        TaskCode = task.TaskCode,
+
+                        Quantity = split.Quantity,
+
+                        CompletedQuantity = 0
+                    };
+
+                    _context.TaskQuantitySplit.Add(row);
+
+                    // Need Id before assigning SplitId
+                    await _context.SaveChangesAsync();
+
+
+                    // ---------------------------------------------
+                    // Attach members to this share
+                    // ---------------------------------------------
+
+                    foreach (var member in createdMembers)
+                    {
+                        var userIdText = member.Assign_To.Split('-')[0];
+
+                        if (!int.TryParse(userIdText, out int memberUserId))
+                            continue;
+
+                        if (split.MemberIds.Contains(memberUserId))
+                        {
+                            member.SplitId = row.Id;
+                        }
+                    }
+
+
+                    // ---------------------------------------------
+                    // Response
+                    // ---------------------------------------------
+
+                    splitResponse.Add(new
+                    {
+                        id = row.Id,
+
+                        quantity = row.Quantity,
+
+                        completedQuantity = row.CompletedQuantity,
+
+                        memberIds = split.MemberIds
+                    });
+                }
+
+                // Save SplitId changes
+                await _context.SaveChangesAsync();
+            }
+
+
+            // =====================================================
+            // 9. UPDATE GOAL STATUS / PROGRESS
+            // =====================================================
+
+            if (goal != null)
+            {
+                var goalTasks = await _context.Tasks
+                    .Where(t => t.GoalCode == goal.GoalCode)
+                    .ToListAsync();
+
+                int total = goalTasks.Count;
+
+                int completed = goalTasks.Count(t =>
+                    !string.IsNullOrWhiteSpace(t.Status) &&
+                    t.Status.Trim().Equals(
+                        "completed",
+                        StringComparison.OrdinalIgnoreCase));
+
+                int notStarted = goalTasks.Count(t =>
+                    !string.IsNullOrWhiteSpace(t.Status) &&
+                    t.Status.Trim().Equals(
+                        "not started",
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (total > 0 && completed == total)
+                {
+                    goal.Status = "completed";
+                    goal.Completed_Date = DateTime.Now;
+                }
+                else if (total > 0 && notStarted == total)
+                {
+                    goal.Status = "not started";
+                    goal.Completed_Date = null;
+                }
+                else
+                {
+                    goal.Status = "inprogress";
+                    goal.Completed_Date = null;
+                }
+
+                goal.Progress =
+                    total == 0
+                        ? 0
+                        : (int)(((double)completed / total) * 100);
+            }
+
+            await _context.SaveChangesAsync();
+
+
+            // =====================================================
+            // 10. SEND TASK ASSIGNED NOTIFICATION
             // =====================================================
 
             foreach (var user in assignedToUsers)
@@ -278,40 +482,35 @@ namespace staff_work_tracking.Controllers
                             "New Task Assigned",
                             $"A new task '{task.Task}' has been assigned to you by {assignedByUser.Name}"
                         );
-
-
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine(
-                            $"FCM Error for user {user.UserId}: {ex}"
-                        );
+                            $"FCM Error for user {user.UserId}: {ex}");
                     }
                 }
-             
             }
+
+
+            // =====================================================
+            // 11. NOTIFY IMMEDIATE HIGHER POSITION
+            // =====================================================
+
             var creatorRoleInfo = await _context.Roles
-      .FirstOrDefaultAsync(r =>
-          r.RoleName == assignedByUser.Role);
+                .FirstOrDefaultAsync(r =>
+                    r.RoleName == assignedByUser.Role);
 
             if (creatorRoleInfo != null)
             {
-                // Find ONLY the immediate higher position.
-                //
-                // Staff (4) -> Assistant Manager (3)
-                // Assistant Manager (3) -> Manager (2)
-                // Manager (2) -> Director (1)
-                //
                 var upperRole = await _context.Roles
                     .Where(r =>
+                        r.Status &&
                         r.Position < creatorRoleInfo.Position)
                     .OrderByDescending(r => r.Position)
                     .FirstOrDefaultAsync();
 
                 if (upperRole != null)
                 {
-                    // Get upper-position users
-                    // from the SAME department
                     var upperUsers = await _context.Users
                         .Where(u =>
                             u.Department == assignedByUser.Department &&
@@ -323,128 +522,1218 @@ namespace staff_work_tracking.Controllers
                     {
                         try
                         {
-                            await _firebaseNotificationService.SendNotificationAsync(
-                                upperUser.FcmToken!,
-                                "New Task Created",
-                                $"{assignedByUser.Name} created a new task '{task.Task}'"
-                            );
+                            await _firebaseNotificationService
+                                .SendNotificationAsync(
+                                    upperUser.FcmToken!,
+                                    "New Task Created",
+                                    $"{assignedByUser.Name} created a new task '{task.Task}'"
+                                );
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine(
-                                $"Upper Position FCM Error " +
-                                $"({upperUser.UserId}): {ex}"
-                            );
+                                $"Upper Position FCM Error ({upperUser.UserId}): {ex}");
                         }
                     }
                 }
             }
 
+
+            // =====================================================
+            // 12. ASSIGNED USERS RESPONSE
+            // =====================================================
+
+            var assignedUsersResponse = assignedToUsers
+                .Select(user => new
+                {
+                    userId = user.UserId,
+                    name = user.Name,
+                    department = user.Department,
+                    role = user.Role
+                })
+                .ToList();
+
+
+            // =====================================================
+            // 13. FINAL RESPONSE
+            // =====================================================
+
             return Ok(new
             {
                 message = "Task created successfully",
-                taskCode = task.TaskCode
+
+                task = new
+                {
+                    id = task.Id,
+
+                    taskCode = task.TaskCode,
+
+                    task = task.Task,
+
+                    goalCode = task.GoalCode,
+
+                    description = task.Description,
+
+                    priority = task.Priority,
+
+                    status = task.Status,
+
+                    startDate = task.Created_At,
+
+                    dueDate = task.Due_Date,
+
+                    performanceType = task.PerformanceType,
+
+                    // IMPORTANT:
+                    // Always the TOTAL task quantity.
+                    quantity = task.Quantity,
+
+                    completedQuantity = task.CompletedQuantity,
+
+                    startTime = task.StartTime,
+
+                    endTime = task.EndTime,
+
+                    members = task.Members,
+
+                    assignedBy = new
+                    {
+                        userId = assignedByUser.UserId,
+                        name = assignedByUser.Name,
+                        department = assignedByUser.Department,
+                        role = assignedByUser.Role
+                    },
+
+                    assignedToIds = assignedUserIds,
+
+                    assignedUsers = assignedUsersResponse,
+
+                    // NEW
+                    quantitySplits = splitResponse
+                }
             });
         }
 
 
         [Authorize]
         [HttpPost("CreateGoal")]
-        public async Task<IActionResult> CreateGoal([FromBody] Goal model)
+        public async Task<IActionResult> CreateGoal([FromBody] CreateGoalRequest model)
         {
             if (model == null)
-                return BadRequest("Invalid data");
+                return BadRequest("Invalid data.");
 
-            var lastGoal = await _context.Goal
-                .OrderByDescending(g => g.Id)
-                .FirstOrDefaultAsync();
+            // ============================================================
+            // 1. GET LOGGED-IN USER
+            // ============================================================
 
-            int nextNumber = 1;
+            var userIdClaim = User.FindFirst("UserId")?.Value;
 
-            if (lastGoal != null && !string.IsNullOrEmpty(lastGoal.GoalCode))
-            {
-                nextNumber = int.Parse(lastGoal.GoalCode.Substring(1)) + 1;
-            }
+            if (string.IsNullOrWhiteSpace(userIdClaim))
+                return Unauthorized("Invalid token.");
 
-            // ✅ Get creator id from token
-            var assignBy = User.FindFirst("UserId")?.Value;
+            if (!int.TryParse(userIdClaim, out int creatorId))
+                return BadRequest("Invalid creator ID.");
 
-            if (assignBy == null)
-                return Unauthorized("Invalid token");
+            // ============================================================
+            // 2. GET CREATOR
+            // ============================================================
 
-            // ✅ Convert to int
-            if (!int.TryParse(assignBy, out int creatorId))
-                return BadRequest("Invalid creator id");
-
-            // ✅ Get creator details
             var creator = await _context.Users
                 .FirstOrDefaultAsync(u => u.UserId == creatorId);
 
             if (creator == null)
-                return BadRequest("Creator not found");
+                return BadRequest("Creator not found.");
 
-            // ❗ FIX: Assign_To is "2-Abi" format
-            var idPart = model.Assign_To.Split('-')[0];
+            // ============================================================
+            // 3. COMMON VALIDATION
+            // ============================================================
 
-            if (!int.TryParse(idPart, out int assignToId))
-                return BadRequest("Invalid Assign_To");
+            if (string.IsNullOrWhiteSpace(model.GoalType))
+                return BadRequest("GoalType is required.");
 
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.UserId == assignToId);
+            if (string.IsNullOrWhiteSpace(model.Title))
+                return BadRequest("Goal title is required.");
 
-            if (user == null)
-                return BadRequest("Assigned user not found");
+            if (model.StartDate > model.DueDate)
+                return BadRequest("Start date cannot be after due date.");
 
-            var goal = new Goal
+            var goalType = model.GoalType.Trim();
+
+            // ============================================================
+            // 4. CREATE YEARLY GOAL
+            // ============================================================
+
+            if (goalType.Equals("Yearly", StringComparison.OrdinalIgnoreCase))
             {
-                GoalCode = $"G{nextNumber}",
-                Title = model.Title,
-                Priority = model.Priority,
-                StartDate = model.StartDate,
-                DueDate = model.DueDate,
-                Assign_To = model.Assign_To,
-                Assign_By = assignBy,
-                Department = user.Department,
-                Progress = 0,
-                Goalpoints = 0,
-                Status = "Not Started"
-            };
+                // --------------------------------------------------------
+                // OPTIONAL YEARLY QUANTITY
+                // --------------------------------------------------------
 
-            _context.Goal.Add(goal);
+                if (model.TargetQuantity.HasValue &&
+                    model.TargetQuantity.Value <= 0)
+                {
+                    return BadRequest(
+                        "Yearly targetQuantity must be greater than 0 when quantity is provided.");
+                }
+
+                // --------------------------------------------------------
+                // MONTHLY GOALS REQUIRED
+                // --------------------------------------------------------
+
+                if (model.MonthlyGoals == null ||
+                    model.MonthlyGoals.Count == 0)
+                {
+                    return BadRequest(
+                        "At least one monthly goal is required for a yearly goal.");
+                }
+
+                // --------------------------------------------------------
+                // VALIDATE MONTHLY QUANTITIES
+                // --------------------------------------------------------
+
+                long monthlyTargetTotal = 0;
+
+                foreach (var monthly in model.MonthlyGoals)
+                {
+                    if (string.IsNullOrWhiteSpace(monthly.Title))
+                    {
+                        return BadRequest(
+                            "Monthly goal title cannot be empty.");
+                    }
+
+                    if (monthly.StartDate > monthly.DueDate)
+                    {
+                        return BadRequest(
+                            $"Invalid dates for monthly goal: {monthly.Title}");
+                    }
+
+                    // Quantity is OPTIONAL
+                    if (monthly.TargetQuantity.HasValue)
+                    {
+                        if (monthly.TargetQuantity.Value <= 0)
+                        {
+                            return BadRequest(
+                                $"TargetQuantity for monthly goal '{monthly.Title}' must be greater than 0 when quantity is provided.");
+                        }
+
+                        monthlyTargetTotal += monthly.TargetQuantity.Value;
+                    }
+
+                    // Assignment is REQUIRED
+                    if (monthly.AssignedUserIds == null ||
+                        monthly.AssignedUserIds.Count == 0)
+                    {
+                        return BadRequest(
+                            $"At least one user must be assigned to monthly goal: {monthly.Title}");
+                    }
+                }
+
+                // --------------------------------------------------------
+                // CHECK MONTHLY TOTAL AGAINST YEARLY TOTAL
+                // ONLY WHEN YEARLY QUANTITY IS PROVIDED
+                // --------------------------------------------------------
+
+                if (model.TargetQuantity.HasValue &&
+                    monthlyTargetTotal > model.TargetQuantity.Value)
+                {
+                    return BadRequest(
+                        $"Total monthly target quantity ({monthlyTargetTotal}) cannot be greater than yearly target quantity ({model.TargetQuantity.Value}).");
+                }
+
+                // --------------------------------------------------------
+                // GENERATE YEARLY GOAL CODE
+                // --------------------------------------------------------
+
+                var lastYearlyGoal = await _context.Goal
+                    .Where(g => g.GoalType == "Yearly")
+                    .OrderByDescending(g => g.Id)
+                    .FirstOrDefaultAsync();
+
+                int nextYearlyNumber = 1;
+
+                if (lastYearlyGoal != null &&
+                    !string.IsNullOrWhiteSpace(lastYearlyGoal.GoalCode))
+                {
+                    var code = lastYearlyGoal.GoalCode;
+
+                    if (code.StartsWith("YG") &&
+                        int.TryParse(code.Substring(2), out int lastNumber))
+                    {
+                        nextYearlyNumber = lastNumber + 1;
+                    }
+                }
+
+                // --------------------------------------------------------
+                // GENERATE MONTHLY GOAL START NUMBER
+                // --------------------------------------------------------
+
+                var lastMonthlyGoal = await _context.Goal
+                    .Where(g => g.GoalType == "Monthly")
+                    .OrderByDescending(g => g.Id)
+                    .FirstOrDefaultAsync();
+
+                int nextMonthlyNumber = 1;
+
+                if (lastMonthlyGoal != null &&
+                    !string.IsNullOrWhiteSpace(lastMonthlyGoal.GoalCode))
+                {
+                    var code = lastMonthlyGoal.GoalCode;
+
+                    if (code.StartsWith("MG") &&
+                        int.TryParse(code.Substring(2), out int lastNumber))
+                    {
+                        nextMonthlyNumber = lastNumber + 1;
+                    }
+                }
+
+                // --------------------------------------------------------
+                // GET ALL ASSIGNED USERS
+                // --------------------------------------------------------
+
+                var allAssignedUserIds = model.MonthlyGoals
+                    .SelectMany(m => m.AssignedUserIds ?? new List<int>())
+                    .Distinct()
+                    .ToList();
+
+                if (allAssignedUserIds.Count == 0)
+                {
+                    return BadRequest(
+                        "At least one user must be assigned to the monthly goals.");
+                }
+
+                // --------------------------------------------------------
+                // GET USERS
+                // --------------------------------------------------------
+
+                var assignedUsers = await _context.Users
+                    .Where(u => allAssignedUserIds.Contains(u.UserId))
+                    .ToListAsync();
+
+                // --------------------------------------------------------
+                // CHECK MISSING USERS
+                // --------------------------------------------------------
+
+                var missingUserIds = allAssignedUserIds
+                    .Except(assignedUsers.Select(u => u.UserId))
+                    .ToList();
+
+                if (missingUserIds.Any())
+                {
+                    return BadRequest(new
+                    {
+                        message = "One or more assigned users were not found.",
+                        userIds = missingUserIds
+                    });
+                }
+
+                // --------------------------------------------------------
+                // DEPARTMENT VALIDATION
+                // --------------------------------------------------------
+
+                foreach (var user in assignedUsers)
+                {
+                    if (!string.Equals(
+                            user.Department,
+                            creator.Department,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return BadRequest(
+                            $"User {user.UserId} does not belong to the creator's department.");
+                    }
+                }
+
+                // ========================================================
+                // TRANSACTION
+                // ========================================================
+
+                using var transaction =
+                    await _context.Database.BeginTransactionAsync();
+
+                try
+                {
+                    // ====================================================
+                    // CREATE YEARLY GOAL
+                    // ====================================================
+
+                    var yearlyGoal = new Goal
+                    {
+                        GoalCode = $"YG{nextYearlyNumber:D3}",
+                        GoalType = "Yearly",
+
+                        ParentGoalId = null,
+
+                        Title = model.Title,
+                        Priority = model.Priority,
+
+                        StartDate = model.StartDate,
+                        DueDate = model.DueDate,
+
+                        Completed_Date = null,
+
+                        Status = "Not Started",
+                        Progress = 0,
+
+                        Goalpoints = 0,
+
+                        // OPTIONAL QUANTITY
+                        TargetQuantity = model.TargetQuantity,
+                        CompletedQuantity = model.TargetQuantity.HasValue
+                            ? 0
+                            : null,
+
+                        CreatedBy = creatorId
+                    };
+
+                    _context.Goal.Add(yearlyGoal);
+
+                    await _context.SaveChangesAsync();
+
+                    // ====================================================
+                    // CREATE MONTHLY GOALS
+                    // ====================================================
+
+                    var createdMonthlyGoals = new List<Goal>();
+
+                    foreach (var monthly in model.MonthlyGoals)
+                    {
+                        var monthlyGoal = new Goal
+                        {
+                            GoalCode = $"MG{nextMonthlyNumber:D3}",
+                            GoalType = "Monthly",
+
+                            ParentGoalId = yearlyGoal.Id,
+
+                            Title = monthly.Title,
+                            Priority = monthly.Priority,
+
+                            StartDate = monthly.StartDate,
+                            DueDate = monthly.DueDate,
+
+                            Completed_Date = null,
+
+                            Status = "Not Started",
+                            Progress = 0,
+
+                            Goalpoints = 0,
+
+                            // OPTIONAL QUANTITY
+                            TargetQuantity = monthly.TargetQuantity,
+                            CompletedQuantity = monthly.TargetQuantity.HasValue
+                                ? 0
+                                : null,
+
+                            CreatedBy = creatorId
+                        };
+
+                        _context.Goal.Add(monthlyGoal);
+
+                        await _context.SaveChangesAsync();
+
+                        createdMonthlyGoals.Add(monthlyGoal);
+
+                        // ------------------------------------------------
+                        // CREATE ASSIGNMENTS
+                        // ------------------------------------------------
+
+                        var uniqueUserIds = monthly.AssignedUserIds
+                            .Distinct()
+                            .ToList();
+
+                        foreach (var assignedUserId in uniqueUserIds)
+                        {
+                            var assignment = new GoalAssignment
+                            {
+                                GoalId = monthlyGoal.Id,
+                                UserId = assignedUserId
+                            };
+
+                            _context.GoalAssignment.Add(assignment);
+                        }
+
+                        await _context.SaveChangesAsync();
+
+                        nextMonthlyNumber++;
+                    }
+
+                    // ====================================================
+                    // COMMIT
+                    // ====================================================
+
+                    await transaction.CommitAsync();
+
+                    // ====================================================
+                    // SUCCESS RESPONSE
+                    // ====================================================
+
+                    return Ok(new
+                    {
+                        message =
+                            "Yearly goal and monthly goals created successfully.",
+
+                        yearlyGoal = new
+                        {
+                            id = yearlyGoal.Id,
+                            goalCode = yearlyGoal.GoalCode,
+                            title = yearlyGoal.Title,
+                            goalType = yearlyGoal.GoalType,
+
+                            targetQuantity = yearlyGoal.TargetQuantity,
+                            completedQuantity = yearlyGoal.CompletedQuantity,
+
+                            pendingQuantity =
+                                yearlyGoal.TargetQuantity.HasValue
+                                    ? yearlyGoal.TargetQuantity.Value -
+                                      (yearlyGoal.CompletedQuantity ?? 0)
+                                    : (int?)null
+                        },
+
+                        monthlyGoals = createdMonthlyGoals.Select(g => new
+                        {
+                            id = g.Id,
+                            goalCode = g.GoalCode,
+                            title = g.Title,
+
+                            priority = g.Priority,
+                            goalType = g.GoalType,
+                            parentGoalId = g.ParentGoalId,
+
+                            targetQuantity = g.TargetQuantity,
+                            completedQuantity = g.CompletedQuantity,
+
+                            pendingQuantity =
+                                g.TargetQuantity.HasValue
+                                    ? g.TargetQuantity.Value -
+                                      (g.CompletedQuantity ?? 0)
+                                    : (int?)null
+                        })
+                    });
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+
+                    return StatusCode(500, new
+                    {
+                        message = "Failed to create yearly goal.",
+                        error = ex.Message
+                    });
+                }
+            }
+
+            // ============================================================
+            // 5. CREATE STANDALONE MONTHLY GOAL
+            // ============================================================
+
+            if (goalType.Equals("Monthly", StringComparison.OrdinalIgnoreCase))
+            {
+                // --------------------------------------------------------
+                // OPTIONAL QUANTITY
+                // --------------------------------------------------------
+
+                if (model.TargetQuantity.HasValue &&
+                    model.TargetQuantity.Value <= 0)
+                {
+                    return BadRequest(
+                        "Monthly targetQuantity must be greater than 0 when quantity is provided.");
+                }
+
+                // --------------------------------------------------------
+                // ASSIGNMENT REQUIRED
+                // --------------------------------------------------------
+
+                if (model.AssignedUserIds == null ||
+                    model.AssignedUserIds.Count == 0)
+                {
+                    return BadRequest(
+                        "At least one user must be assigned to the monthly goal.");
+                }
+
+                // --------------------------------------------------------
+                // GET PARENT YEARLY GOAL
+                // --------------------------------------------------------
+
+                Goal? parentGoal = null;
+
+                if (model.ParentGoalId.HasValue)
+                {
+                    parentGoal = await _context.Goal
+                        .FirstOrDefaultAsync(g =>
+                            g.Id == model.ParentGoalId.Value);
+
+                    if (parentGoal == null)
+                    {
+                        return BadRequest(
+                            "The selected parent goal was not found.");
+                    }
+
+                    if (!string.Equals(
+                            parentGoal.GoalType,
+                            "Yearly",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return BadRequest(
+                            "A monthly goal can only have a Yearly parent goal.");
+                    }
+
+                    // ----------------------------------------------------
+                    // CHECK QUANTITY ONLY IF BOTH HAVE QUANTITY
+                    // ----------------------------------------------------
+
+                    if (model.TargetQuantity.HasValue &&
+                        parentGoal.TargetQuantity.HasValue)
+                    {
+                        var existingMonthlyQuantity = await _context.Goal
+                            .Where(g =>
+                                g.ParentGoalId == parentGoal.Id &&
+                                g.GoalType == "Monthly" &&
+                                g.TargetQuantity.HasValue)
+                            .SumAsync(g => (long?)g.TargetQuantity ?? 0);
+
+                        var newTotal =
+                            existingMonthlyQuantity +
+                            model.TargetQuantity.Value;
+
+                        if (newTotal > parentGoal.TargetQuantity.Value)
+                        {
+                            return BadRequest(
+                                $"Monthly target quantity would exceed the parent yearly target. " +
+                                $"Yearly target: {parentGoal.TargetQuantity.Value}, " +
+                                $"existing monthly target: {existingMonthlyQuantity}, " +
+                                $"new monthly target: {model.TargetQuantity.Value}.");
+                        }
+                    }
+                }
+
+                // --------------------------------------------------------
+                // GET ASSIGNED USERS
+                // --------------------------------------------------------
+
+                var assignedUserIds = model.AssignedUserIds
+                    .Distinct()
+                    .ToList();
+
+                var assignedUsers = await _context.Users
+                    .Where(u => assignedUserIds.Contains(u.UserId))
+                    .ToListAsync();
+
+                // --------------------------------------------------------
+                // CHECK MISSING USERS
+                // --------------------------------------------------------
+
+                var missingUserIds = assignedUserIds
+                    .Except(assignedUsers.Select(u => u.UserId))
+                    .ToList();
+
+                if (missingUserIds.Any())
+                {
+                    return BadRequest(new
+                    {
+                        message = "One or more assigned users were not found.",
+                        userIds = missingUserIds
+                    });
+                }
+
+                // --------------------------------------------------------
+                // DEPARTMENT VALIDATION
+                // --------------------------------------------------------
+
+                foreach (var user in assignedUsers)
+                {
+                    if (!string.Equals(
+                            user.Department,
+                            creator.Department,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return BadRequest(
+                            $"User {user.UserId} does not belong to the creator's department.");
+                    }
+                }
+
+                // --------------------------------------------------------
+                // GENERATE MONTHLY CODE
+                // --------------------------------------------------------
+
+                var lastMonthlyGoal = await _context.Goal
+                    .Where(g => g.GoalType == "Monthly")
+                    .OrderByDescending(g => g.Id)
+                    .FirstOrDefaultAsync();
+
+                int nextMonthlyNumber = 1;
+
+                if (lastMonthlyGoal != null &&
+                    !string.IsNullOrWhiteSpace(lastMonthlyGoal.GoalCode))
+                {
+                    var code = lastMonthlyGoal.GoalCode;
+
+                    if (code.StartsWith("MG") &&
+                        int.TryParse(code.Substring(2), out int lastNumber))
+                    {
+                        nextMonthlyNumber = lastNumber + 1;
+                    }
+                }
+
+                // ========================================================
+                // TRANSACTION
+                // ========================================================
+
+                using var monthlyTransaction =
+                    await _context.Database.BeginTransactionAsync();
+
+                try
+                {
+                    // ====================================================
+                    // CREATE MONTHLY GOAL
+                    // ====================================================
+
+                    var monthlyGoal = new Goal
+                    {
+                        GoalCode = $"MG{nextMonthlyNumber:D3}",
+                        GoalType = "Monthly",
+
+                        ParentGoalId = model.ParentGoalId,
+
+                        Title = model.Title,
+                        Priority = model.Priority,
+
+                        StartDate = model.StartDate,
+                        DueDate = model.DueDate,
+
+                        Completed_Date = null,
+
+                        Status = "Not Started",
+                        Progress = 0,
+
+                        Goalpoints = 0,
+
+                        // OPTIONAL QUANTITY
+                        TargetQuantity = model.TargetQuantity,
+                        CompletedQuantity = model.TargetQuantity.HasValue
+                            ? 0
+                            : null,
+
+                        CreatedBy = creatorId
+                    };
+
+                    _context.Goal.Add(monthlyGoal);
+
+                    await _context.SaveChangesAsync();
+
+                    // ====================================================
+                    // CREATE ASSIGNMENTS
+                    // ====================================================
+
+                    foreach (var userId in assignedUserIds)
+                    {
+                        var assignment = new GoalAssignment
+                        {
+                            GoalId = monthlyGoal.Id,
+                            UserId = userId
+                        };
+
+                        _context.GoalAssignment.Add(assignment);
+                    }
+
+                    await _context.SaveChangesAsync();
+
+                    // ====================================================
+                    // COMMIT
+                    // ====================================================
+
+                    await monthlyTransaction.CommitAsync();
+
+                    // ====================================================
+                    // SUCCESS RESPONSE
+                    // ====================================================
+
+                    return Ok(new
+                    {
+                        message = "Monthly goal created successfully.",
+
+                        goal = new
+                        {
+                            id = monthlyGoal.Id,
+                            goalCode = monthlyGoal.GoalCode,
+                            goalType = monthlyGoal.GoalType,
+                            parentGoalId = monthlyGoal.ParentGoalId,
+
+                            title = monthlyGoal.Title,
+                            priority = monthlyGoal.Priority,
+
+                            startDate = monthlyGoal.StartDate,
+                            dueDate = monthlyGoal.DueDate,
+
+                            status = monthlyGoal.Status,
+                            createdBy = monthlyGoal.CreatedBy,
+
+                            targetQuantity = monthlyGoal.TargetQuantity,
+                            completedQuantity = monthlyGoal.CompletedQuantity,
+
+                            pendingQuantity =
+                                monthlyGoal.TargetQuantity.HasValue
+                                    ? monthlyGoal.TargetQuantity.Value -
+                                      (monthlyGoal.CompletedQuantity ?? 0)
+                                    : (int?)null
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    await monthlyTransaction.RollbackAsync();
+
+                    return StatusCode(500, new
+                    {
+                        message = "Failed to create monthly goal.",
+                        error = ex.Message
+                    });
+                }
+            }
+
+            // ============================================================
+            // 6. INVALID GOAL TYPE
+            // ============================================================
+
+            return BadRequest(
+                "Invalid GoalType. Allowed values are Yearly or Monthly.");
+        }
+
+        [Authorize]
+        [HttpPut("UpdateGoal/{code}")]
+        public async Task<IActionResult> UpdateGoal(string code,[FromBody] UpdateGoalDto model)
+        {
+            if (model == null)
+                return BadRequest("Invalid data.");
+
+            if (string.IsNullOrWhiteSpace(code))
+                return BadRequest("Goal code is required.");
+
+            // =========================================================
+            // 1. GET LOGGED-IN USER
+            // =========================================================
+
+            var userIdClaim = User.FindFirst("UserId");
+            var roleClaim = User.FindFirst("Role");
+
+            if (userIdClaim == null)
+                return Unauthorized("User ID not found in token.");
+
+            if (!int.TryParse(userIdClaim.Value, out int editorId))
+                return BadRequest("Invalid user ID.");
+
+            string editorRole = roleClaim?.Value ?? "Unknown";
+
+            var editor = await _context.Users
+                .FirstOrDefaultAsync(u => u.UserId == editorId);
+
+            if (editor == null)
+                return BadRequest("Editor not found.");
+
+            // =========================================================
+            // 2. FIND GOAL
+            // =========================================================
+
+            var goal = await _context.Goal
+                .FirstOrDefaultAsync(g => g.GoalCode == code);
+
+            if (goal == null)
+                return NotFound("Goal not found.");
+
+            // =========================================================
+            // 3. GET CURRENT ASSIGNED USERS
+            // =========================================================
+
+            var oldAssignedUserIds = await _context.GoalAssignment
+                .Where(a => a.GoalId == goal.Id)
+                .Select(a => a.UserId)
+                .Distinct()
+                .ToListAsync();
+
+            // =========================================================
+            // 4. STORE OLD VALUES FOR AUDIT
+            // =========================================================
+
+            var oldTitle = goal.Title;
+            var oldPriority = goal.Priority;
+            var oldDueDate = goal.DueDate;
+            var oldTargetQuantity = goal.TargetQuantity;
+
+            // =========================================================
+            // 5. VALIDATE TITLE
+            // =========================================================
+
+            if (model.Title != null)
+            {
+                if (string.IsNullOrWhiteSpace(model.Title))
+                {
+                    return BadRequest("Goal title cannot be empty.");
+                }
+
+                goal.Title = model.Title.Trim();
+            }
+
+            // =========================================================
+            // 6. UPDATE PRIORITY
+            // =========================================================
+
+            if (model.Priority != null)
+            {
+                goal.Priority = string.IsNullOrWhiteSpace(model.Priority)
+                    ? null
+                    : model.Priority.Trim();
+            }
+
+            // =========================================================
+            // 7. UPDATE DUE DATE
+            // =========================================================
+
+            if (model.DueDate.HasValue)
+            {
+                if (model.DueDate.Value < goal.StartDate)
+                {
+                    return BadRequest(
+                        "Due date cannot be earlier than the goal start date.");
+                }
+
+                goal.DueDate = model.DueDate.Value;
+            }
+
+            if (model.TargetQuantity.HasValue)
+            {
+                if (model.TargetQuantity.Value <= 0)
+                {
+                    return BadRequest(
+                        "TargetQuantity must be greater than 0 when quantity is provided.");
+                }
+
+                var completedQuantity = goal.CompletedQuantity ?? 0;
+
+                if (model.TargetQuantity.Value < completedQuantity)
+                {
+                    return BadRequest(
+                        $"Target quantity cannot be less than completed quantity ({completedQuantity}).");
+                }
+
+                // ---------------------------------------------------------
+                // If this is a monthly goal with yearly parent,
+                // validate against yearly quantity when available.
+                // ---------------------------------------------------------
+
+                if (goal.GoalType.Equals(
+                        "Monthly",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    goal.ParentGoalId.HasValue)
+                {
+                    var parentGoal = await _context.Goal
+                        .FirstOrDefaultAsync(g =>
+                            g.Id == goal.ParentGoalId.Value);
+
+                    if (parentGoal != null &&
+                        parentGoal.TargetQuantity.HasValue)
+                    {
+                        // Get other monthly goals under same yearly goal
+                        var otherMonthlyTotal = await _context.Goal
+                            .Where(g =>
+                                g.ParentGoalId == parentGoal.Id &&
+                                g.GoalType == "Monthly" &&
+                                g.Id != goal.Id &&
+                                g.TargetQuantity.HasValue)
+                            .SumAsync(g => (long?)g.TargetQuantity ?? 0);
+
+                        var newMonthlyTotal =
+                            otherMonthlyTotal +
+                            model.TargetQuantity.Value;
+
+                        if (newMonthlyTotal > parentGoal.TargetQuantity.Value)
+                        {
+                            return BadRequest(
+                                $"Monthly target quantity would exceed the yearly target. " +
+                                $"Yearly target: {parentGoal.TargetQuantity.Value}, " +
+                                $"other monthly quantity: {otherMonthlyTotal}, " +
+                                $"new monthly quantity: {model.TargetQuantity.Value}.");
+                        }
+                    }
+                }
+
+                goal.TargetQuantity = model.TargetQuantity.Value;
+            }
+
+          
+
+            bool assignmentChanged = false;
+
+            if (model.AssignedUserIds != null)
+            {
+                var newAssignedUserIds = model.AssignedUserIds
+                    .Distinct()
+                    .ToList();
+
+                // ---------------------------------------------------------
+                // Staff is required
+                // ---------------------------------------------------------
+
+                if (newAssignedUserIds.Count == 0)
+                {
+                    return BadRequest(
+                        "At least one staff member must be assigned to the goal.");
+                }
+
+                // ---------------------------------------------------------
+                // Get selected users
+                // ---------------------------------------------------------
+
+                var newAssignedUsers = await _context.Users
+                    .Where(u => newAssignedUserIds.Contains(u.UserId))
+                    .ToListAsync();
+
+                // ---------------------------------------------------------
+                // Check missing users
+                // ---------------------------------------------------------
+
+                var missingUserIds = newAssignedUserIds
+                    .Except(newAssignedUsers.Select(u => u.UserId))
+                    .ToList();
+
+                if (missingUserIds.Any())
+                {
+                    return BadRequest(new
+                    {
+                        message = "One or more assigned users were not found.",
+                        userIds = missingUserIds
+                    });
+                }
+
+                // ---------------------------------------------------------
+                // Department validation
+                // ---------------------------------------------------------
+
+                foreach (var user in newAssignedUsers)
+                {
+                    if (!string.Equals(
+                            user.Department,
+                            editor.Department,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return BadRequest(
+                            $"User {user.UserId} does not belong to the editor's department.");
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // Check whether assignment actually changed
+                // ---------------------------------------------------------
+
+                assignmentChanged =
+                    !oldAssignedUserIds
+                        .OrderBy(x => x)
+                        .SequenceEqual(
+                            newAssignedUserIds.OrderBy(x => x));
+
+                // ---------------------------------------------------------
+                // Replace assignments
+                // ---------------------------------------------------------
+
+                if (assignmentChanged)
+                {
+                    var existingAssignments = await _context.GoalAssignment
+                        .Where(a => a.GoalId == goal.Id)
+                        .ToListAsync();
+
+                    _context.GoalAssignment.RemoveRange(existingAssignments);
+
+                    foreach (var assignedUserId in newAssignedUserIds)
+                    {
+                        _context.GoalAssignment.Add(
+                            new GoalAssignment
+                            {
+                                GoalId = goal.Id,
+                                UserId = assignedUserId
+                            });
+                    }
+                }
+            }
+
+            // =========================================================
+            // 10. CHECK WHAT CHANGED
+            // =========================================================
+
+            bool titleChanged =
+                oldTitle != goal.Title;
+
+            bool priorityChanged =
+                oldPriority != goal.Priority;
+
+            bool dueDateChanged =
+                oldDueDate != goal.DueDate;
+
+            bool quantityChanged =
+                oldTargetQuantity != goal.TargetQuantity;
+
+            if (!titleChanged &&
+                !priorityChanged &&
+                !dueDateChanged &&
+                !quantityChanged &&
+                !assignmentChanged)
+            {
+                return BadRequest("No changes were made.");
+            }
+
+            // =========================================================
+            // 11. BUILD AUDIT INFORMATION
+            // =========================================================
+
+            var changedFields = new List<string>();
+
+            if (titleChanged)
+                changedFields.Add("Title");
+
+            if (priorityChanged)
+                changedFields.Add("Priority");
+
+            if (dueDateChanged)
+                changedFields.Add("DueDate");
+
+            if (quantityChanged)
+                changedFields.Add("TargetQuantity");
+
+            if (assignmentChanged)
+                changedFields.Add("AssignedStaff");
+
+            // =========================================================
+            // 12. OLD ASSIGNED STAFF TEXT
+            // =========================================================
+
+            var oldAssignedUsers = await _context.Users
+                .Where(u => oldAssignedUserIds.Contains(u.UserId))
+                .Select(u => new
+                {
+                    u.UserId,
+                    u.Name
+                })
+                .ToListAsync();
+
+            var oldStaffText = oldAssignedUsers.Count > 0
+                ? string.Join(
+                    ", ",
+                    oldAssignedUsers.Select(
+                        u => $"{u.Name} ({u.UserId})"))
+                : "None";
+
+            // =========================================================
+            // 13. NEW ASSIGNED STAFF TEXT
+            // =========================================================
+
+            List<int> finalAssignedUserIds;
+
+            if (model.AssignedUserIds != null)
+            {
+                finalAssignedUserIds = model.AssignedUserIds
+                    .Distinct()
+                    .ToList();
+            }
+            else
+            {
+                finalAssignedUserIds = oldAssignedUserIds;
+            }
+
+            var newAssignedUsersForAudit = await _context.Users
+                .Where(u => finalAssignedUserIds.Contains(u.UserId))
+                .Select(u => new
+                {
+                    u.UserId,
+                    u.Name
+                })
+                .ToListAsync();
+
+            var newStaffText = newAssignedUsersForAudit.Count > 0
+                ? string.Join(
+                    ", ",
+                    newAssignedUsersForAudit.Select(
+                        u => $"{u.Name} ({u.UserId})"))
+                : "None";
+
+            // =========================================================
+            // 14. AUDIT LOG
+            // =========================================================
+
+            _context.Auditlog.Add(new Auditlog
+            {
+                EntityId = goal.GoalCode,
+                EntityType = "Goal",
+                Action = "Edit",
+
+                Fieldchanged = string.Join(
+                    ", ",
+                    changedFields),
+
+                Oldvalue =
+                    $"Title: {oldTitle}; " +
+                    $"Priority: {oldPriority}; " +
+                    $"DueDate: {oldDueDate:yyyy-MM-dd}; " +
+                    $"TargetQuantity: {oldTargetQuantity?.ToString() ?? "None"}; " +
+                    $"AssignedStaff: {oldStaffText}",
+
+                Newvalue =
+                    $"Title: {goal.Title}; " +
+                    $"Priority: {goal.Priority}; " +
+                    $"DueDate: {goal.DueDate:yyyy-MM-dd}; " +
+                    $"TargetQuantity: {goal.TargetQuantity?.ToString() ?? "None"}; " +
+                    $"AssignedStaff: {newStaffText}",
+
+                EditedUid = editor.UserId.ToString(),
+                EditedRole = editorRole,
+                ChangeDateandTime = DateTime.Now
+            });
+
+            // =========================================================
+            // 15. SAVE
+            // =========================================================
+
             await _context.SaveChangesAsync();
 
-            if (!string.IsNullOrWhiteSpace(user.FcmToken))
+            // =========================================================
+            // 16. NOTIFY CURRENTLY ASSIGNED STAFF
+            // =========================================================
+
+            var finalAssignedUsers = await _context.Users
+                .Where(u =>
+                    finalAssignedUserIds.Contains(u.UserId) &&
+                    !string.IsNullOrWhiteSpace(u.FcmToken))
+                .ToListAsync();
+
+            foreach (var assignedUser in finalAssignedUsers)
             {
                 try
                 {
                     await _firebaseNotificationService.SendNotificationAsync(
-                        user.FcmToken,
-                        "New Goal Assigned",
-                        $"A new goal '{goal.Title}' has been assigned to you by {creator.Name}"
+                        assignedUser.FcmToken,
+                        "Goal Updated",
+                        $"The goal '{goal.Title}' was updated by {editor.Name}."
                     );
-
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"FCM Error: {ex}");
+                    Console.WriteLine(
+                        $"FCM Error ({assignedUser.UserId}): {ex.Message}");
                 }
             }
-            if (int.TryParse(creator.Role, out int creatorPosition))
+
+            // =========================================================
+            // 17. NOTIFY IMMEDIATE HIGHER ROLE
+            // =========================================================
+
+            if (int.TryParse(editor.Role, out int editorPosition))
             {
-                // Find immediate higher position
                 var upperRole = await _context.Roles
                     .Where(r =>
                         r.Status &&
-                        r.Position < creatorPosition)
+                        r.Position < editorPosition)
                     .OrderByDescending(r => r.Position)
                     .FirstOrDefaultAsync();
 
                 if (upperRole != null)
                 {
-                    // Users.Role stores the position number
                     var upperUsers = await _context.Users
                         .Where(u =>
-                            u.Department == creator.Department &&
+                            u.Department == editor.Department &&
                             u.Role == upperRole.Position.ToString() &&
                             !string.IsNullOrWhiteSpace(u.FcmToken))
                         .ToListAsync();
@@ -455,124 +1744,305 @@ namespace staff_work_tracking.Controllers
                         {
                             await _firebaseNotificationService.SendNotificationAsync(
                                 upperUser.FcmToken,
-                                "Goal Created",
-                                $"{creator.Name} created a new goal '{goal.Title}'"
+                                "Goal Updated",
+                                $"{editor.Name} updated the goal '{goal.Title}'."
                             );
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine(
-                                $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}"
-                            );
+                                $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}");
                         }
                     }
                 }
             }
+
+            // =========================================================
+            // 18. GET FINAL ASSIGNED USERS FOR RESPONSE
+            // =========================================================
+
+            var responseAssignedUsers = await _context.Users
+                .Where(u => finalAssignedUserIds.Contains(u.UserId))
+                .Select(u => new
+                {
+                    userId = u.UserId,
+                    name = u.Name,
+                    email = u.Email,
+                    department = u.Department
+                })
+                .ToListAsync();
+
+            // =========================================================
+            // 19. RESPONSE
+            // =========================================================
+
             return Ok(new
             {
-                message = "Goal created successfully",
-                goalCode = goal.GoalCode
+                message = "Goal updated successfully.",
+
+                goal = new
+                {
+                    id = goal.Id,
+                    goalCode = goal.GoalCode,
+                    goalType = goal.GoalType,
+                    parentGoalId = goal.ParentGoalId,
+
+                    title = goal.Title,
+                    priority = goal.Priority,
+
+                    startDate = goal.StartDate,
+                    dueDate = goal.DueDate,
+
+                    status = goal.Status,
+                    progress = goal.Progress,
+                    goalpoints = goal.Goalpoints,
+
+                    targetQuantity = goal.TargetQuantity,
+                    completedQuantity = goal.CompletedQuantity,
+
+                    pendingQuantity =
+                        goal.TargetQuantity.HasValue
+                            ? Math.Max(
+                                0,
+                                goal.TargetQuantity.Value -
+                                (goal.CompletedQuantity ?? 0))
+                            : (int?)null,
+
+                    assignedUsers = responseAssignedUsers
+                }
             });
         }
 
         [Authorize]
-        [HttpPut("UpdateGoal/{code}")]
-        public async Task<IActionResult> UpdateGoal(string code, [FromBody] UpdateGoalDto model)
+        [HttpDelete("DeleteGoal/{code}")]
+        public async Task<IActionResult> DeleteGoal(string code)
         {
-            if (model == null)
-                return BadRequest("Invalid data");
+            // =========================================================
+            // 1. GET LOGGED-IN USER
+            // =========================================================
 
-            // ✅ Get logged-in user
             var userIdClaim = User.FindFirst("UserId");
             var roleClaim = User.FindFirst("Role");
 
             if (userIdClaim == null)
-                return Unauthorized();
+                return Unauthorized("User ID not found in token.");
 
-            int editorId = int.Parse(userIdClaim.Value);
+            if (!int.TryParse(userIdClaim.Value, out int editorId))
+                return BadRequest("Invalid user ID.");
+
             string editorRole = roleClaim?.Value ?? "Unknown";
 
-            var editor = await _context.Users.FindAsync(editorId);
-            if (editor == null)
-                return BadRequest("Editor not found");
+            var editor = await _context.Users
+                .FirstOrDefaultAsync(u => u.UserId == editorId);
 
-            // ✅ Find goal
+            if (editor == null)
+                return BadRequest("Editor not found.");
+
+            // =========================================================
+            // 2. FIND GOAL
+            // =========================================================
+
             var goal = await _context.Goal
                 .FirstOrDefaultAsync(g => g.GoalCode == code);
 
             if (goal == null)
-                return NotFound("Goal not found");
+                return NotFound("Goal not found.");
 
-            // ✅ Track old values
-            var oldTitle = goal.Title;
-            var oldPriority = goal.Priority;
-            var oldDueDate = goal.DueDate;
+            // =========================================================
+            // 3. DON'T DELETE COMPLETED GOAL
+            // =========================================================
 
-            // ✅ Update only allowed fields
-            if (!string.IsNullOrWhiteSpace(model.Title))
-                goal.Title = model.Title;
-
-            if (!string.IsNullOrWhiteSpace(model.Priority))
-                goal.Priority = model.Priority;
-
-            if (model.DueDate.HasValue)
-                goal.DueDate = model.DueDate.Value;
-
-
-            // ✅ Audit log (simple)
-            _context.Auditlog.Add(new Auditlog
+            if (string.Equals(
+                    goal.Status,
+                    "Completed",
+                    StringComparison.OrdinalIgnoreCase))
             {
-                EntityId = goal.GoalCode,
-                EntityType = "Goal",
-                Action = "Edit",
-                Fieldchanged = "Goal",
-                Oldvalue = oldTitle,
-                Newvalue = goal.Title,
-                EditedUid = editor.UserId.ToString(),
-                EditedRole = editorRole,
-                ChangeDateandTime = DateTime.Now
-            });
+                return BadRequest("Cannot delete completed goal.");
+            }
 
-            await _context.SaveChangesAsync();
+            var goalName = goal.Title;
 
-            var assignToIdPart = goal.Assign_To?.Split('-')[0];
+            // =========================================================
+            // 4. FIND RELATED GOALS
+            // =========================================================
 
-            if (int.TryParse(assignToIdPart, out int assignedUserId))
+            var goalIds = new List<int>
+    {
+        goal.Id
+    };
+
+            // If Yearly Goal -> also delete its Monthly Goals
+            if (string.Equals(
+                    goal.GoalType,
+                    "Yearly",
+                    StringComparison.OrdinalIgnoreCase))
             {
-                var assignedUser = await _context.Users
-                    .FirstOrDefaultAsync(u => u.UserId == assignedUserId);
+                var monthlyGoalIds = await _context.Goal
+                    .Where(g => g.ParentGoalId == goal.Id)
+                    .Select(g => g.Id)
+                    .ToListAsync();
 
-                if (assignedUser != null &&
-                    !string.IsNullOrWhiteSpace(assignedUser.FcmToken))
+                goalIds.AddRange(monthlyGoalIds);
+            }
+
+            // =========================================================
+            // 5. GET ASSIGNED USERS BEFORE DELETE
+            //    Needed for notification
+            // =========================================================
+
+            var assignedUserIds = await _context.GoalAssignment
+                .Where(a => goalIds.Contains(a.GoalId))
+                .Select(a => a.UserId)
+                .Distinct()
+                .ToListAsync();
+
+            var assignedUsers = await _context.Users
+                .Where(u =>
+                    assignedUserIds.Contains(u.UserId) &&
+                    !string.IsNullOrWhiteSpace(u.FcmToken))
+                .ToListAsync();
+
+            // =========================================================
+            // 6. GET ALL TASKS FOR THESE GOALS
+            // =========================================================
+
+            var goalCodes = await _context.Goal
+                .Where(g => goalIds.Contains(g.Id))
+                .Select(g => g.GoalCode)
+                .ToListAsync();
+
+            var tasks = await _context.Tasks
+                .Where(t => goalCodes.Contains(t.GoalCode))
+                .ToListAsync();
+
+            // =========================================================
+            // 7. TRANSACTION
+            // =========================================================
+
+            using var transaction =
+                await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                // =====================================================
+                // 8. AUDIT LOG
+                // =====================================================
+
+                _context.Auditlog.Add(new Auditlog
                 {
-                    try
+                    EntityId = goal.GoalCode,
+                    EntityType = "Goal",
+                    Action = "Delete",
+                    Fieldchanged = "Goal",
+                    Oldvalue = goalName,
+                    Newvalue = "Deleted",
+                    EditedUid = editor.UserId.ToString(),
+                    EditedRole = editorRole,
+                    ChangeDateandTime = DateTime.Now
+                });
+
+                // =====================================================
+                // 9. DELETE TASKS
+                // =====================================================
+
+                if (tasks.Any())
+                {
+                    _context.Tasks.RemoveRange(tasks);
+                }
+
+                // =====================================================
+                // 10. DELETE GOAL ASSIGNMENTS
+                // =====================================================
+
+                var goalAssignments = await _context.GoalAssignment
+                    .Where(a => goalIds.Contains(a.GoalId))
+                    .ToListAsync();
+
+                if (goalAssignments.Any())
+                {
+                    _context.GoalAssignment.RemoveRange(goalAssignments);
+                }
+
+                // =====================================================
+                // 11. DELETE MONTHLY GOALS
+                // =====================================================
+
+                if (goalIds.Count > 1)
+                {
+                    var monthlyGoals = await _context.Goal
+                        .Where(g =>
+                            goalIds.Contains(g.Id) &&
+                            g.Id != goal.Id)
+                        .ToListAsync();
+
+                    if (monthlyGoals.Any())
                     {
-                        await _firebaseNotificationService.SendNotificationAsync(
-                            assignedUser.FcmToken,
-                            "Goal Updated",
-                            $"The goal '{goal.Title}' assigned to you was updated by {editor.Name}"
-                        );
+                        _context.Goal.RemoveRange(monthlyGoals);
                     }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"FCM Error: {ex}");
-                    }
+                }
+
+                // =====================================================
+                // 12. DELETE MAIN GOAL
+                // =====================================================
+
+                _context.Goal.Remove(goal);
+
+                // =====================================================
+                // 13. SAVE EVERYTHING
+                // =====================================================
+
+                await _context.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+
+                return StatusCode(500, new
+                {
+                    message = "Failed to delete goal.",
+                    error = ex.Message
+                });
+            }
+
+            // =========================================================
+            // 14. NOTIFY ASSIGNED USERS
+            // =========================================================
+
+            foreach (var assignedUser in assignedUsers)
+            {
+                try
+                {
+                    await _firebaseNotificationService.SendNotificationAsync(
+                        assignedUser.FcmToken,
+                        "Goal Deleted",
+                        $"The goal '{goalName}' assigned to you was deleted by {editor.Name}."
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(
+                        $"FCM Error ({assignedUser.UserId}): {ex.Message}"
+                    );
                 }
             }
 
-            if (int.TryParse(editor.Role, out int creatorPosition))
+            // =========================================================
+            // 15. NOTIFY IMMEDIATE HIGHER ROLE
+            // =========================================================
+
+            if (int.TryParse(editor.Role, out int editorPosition))
             {
-                // Find immediate higher position
                 var upperRole = await _context.Roles
                     .Where(r =>
                         r.Status &&
-                        r.Position < creatorPosition)
+                        r.Position < editorPosition)
                     .OrderByDescending(r => r.Position)
                     .FirstOrDefaultAsync();
 
                 if (upperRole != null)
                 {
-                    // Users.Role stores the position number
                     var upperUsers = await _context.Users
                         .Where(u =>
                             u.Department == editor.Department &&
@@ -585,157 +2055,10 @@ namespace staff_work_tracking.Controllers
                         try
                         {
                             await _firebaseNotificationService.SendNotificationAsync(
-                                         upperUser.FcmToken,
-                                         "Goal Updated",
-                                         $"{editor.Name} updated the goal '{goal.Title}'"
-                                     );
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine(
-                                $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}"
+                                upperUser.FcmToken,
+                                "Goal Deleted",
+                                $"{editor.Name} deleted the goal '{goalName}'."
                             );
-                        }
-                    }
-                }
-            }
-            return Ok(new
-            {
-                message = "Goal updated successfully"
-            });
-        }
-
-
-        [Authorize]
-        [HttpDelete("DeleteGoal/{code}")]
-        public async Task<IActionResult> DeleteGoal(string code)
-        {
-            // ✅ Get logged-in user
-            var userIdClaim = User.FindFirst("UserId");
-            var roleClaim = User.FindFirst("Role");
-
-            if (userIdClaim == null)
-                return Unauthorized();
-
-            int editorId = int.Parse(userIdClaim.Value);
-            string editorRole = roleClaim?.Value ?? "Unknown";
-
-            var editor = await _context.Users.FindAsync(editorId);
-            if (editor == null)
-                return BadRequest("Editor not found");
-
-            // ✅ Get Goal
-            var goal = await _context.Goal
-                .FirstOrDefaultAsync(g => g.GoalCode == code);
-
-            if (goal == null)
-                return NotFound("Goal not found");
-
-            // ✅ Fix message
-            if (goal.Status == "completed")
-                return BadRequest("Cannot delete completed goal");
-
-            var goalName = goal.Title;
-
-            // ✅ Get all tasks under this goal
-            var tasks = await _context.Tasks
-                .Where(t => t.GoalCode == code)
-                .ToListAsync();
-
-            // ✅ Audit log for Goal
-            _context.Auditlog.Add(new Auditlog
-            {
-                EntityId = goal.GoalCode,
-                EntityType = "Goal",
-                Action = "Delete",
-                Fieldchanged = "Goal",
-                Oldvalue = goalName,
-                Newvalue = "Deleted",
-                EditedUid = editor.UserId.ToString(),
-                EditedRole = editorRole,
-                ChangeDateandTime = DateTime.Now
-            });
-
-           
-            if (tasks.Any())
-            {
-                _context.Tasks.RemoveRange(tasks);
-            }
-
-            // ✅ Delete Goal
-            _context.Goal.Remove(goal);
-
-         
-            // ✅ Save changes
-            await _context.SaveChangesAsync();
-            // =====================================================
-            // SEND GOAL DELETED NOTIFICATION TO ASSIGNED USER
-            // =====================================================
-
-            var assignToIdPart = goal.Assign_To?.Split('-')[0];
-
-            if (int.TryParse(assignToIdPart, out int assignedUserId))
-            {
-                var assignedUser = await _context.Users
-                    .FirstOrDefaultAsync(u => u.UserId == assignedUserId);
-
-                if (assignedUser != null &&
-                    !string.IsNullOrWhiteSpace(assignedUser.FcmToken))
-                {
-                    try
-                    {
-                        await _firebaseNotificationService.SendNotificationAsync(
-                            assignedUser.FcmToken,
-                            "Goal Deleted",
-                            $"The goal '{goalName}' assigned to you was deleted by {editor.Name}"
-                        );
-
-                
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"FCM Error: {ex}");
-                    }
-                }
-               
-            }
-
-            // Delete Goal
-            _context.Goal.Remove(goal);
-
-            // Save changes
-            await _context.SaveChangesAsync();
-     
-            if (int.TryParse(editor.Role, out int creatorPosition))
-            {
-                // Find immediate higher position
-                var upperRole = await _context.Roles
-                    .Where(r =>
-                        r.Status &&
-                        r.Position < creatorPosition)
-                    .OrderByDescending(r => r.Position)
-                    .FirstOrDefaultAsync();
-
-                if (upperRole != null)
-                {
-                    // Users.Role stores the position number
-                    var upperUsers = await _context.Users
-                        .Where(u =>
-                            u.Department == editor.Department &&
-                            u.Role == upperRole.Position.ToString() &&
-                            !string.IsNullOrWhiteSpace(u.FcmToken))
-                        .ToListAsync();
-
-                    foreach (var upperUser in upperUsers)
-                    {
-                        try
-                        {
-                            await _firebaseNotificationService
-                                .SendNotificationAsync(
-                                    upperUser.FcmToken,
-                                    "Goal Deleted",
-                                    $"{editor.Name} deleted the goal '{goalName}'"
-                                );
                         }
                         catch (Exception ex)
                         {
@@ -747,9 +2070,15 @@ namespace staff_work_tracking.Controllers
                 }
             }
 
+            // =========================================================
+            // 16. RESPONSE
+            // =========================================================
+
             return Ok(new
             {
-                message = "Goal and its tasks deleted successfully"
+                message = goal.GoalType == "Yearly"
+                    ? "Yearly goal, monthly goals, assignments and tasks deleted successfully."
+                    : "Goal, assignments and tasks deleted successfully."
             });
         }
 
@@ -757,326 +2086,1489 @@ namespace staff_work_tracking.Controllers
         [HttpGet("GetGoals")]
         public async Task<IActionResult> GetGoals()
         {
-            var userId = int.Parse(User.FindFirst("UserId")!.Value);
-            var role = User.FindFirst("Role")!.Value;
+            // =========================================================
+            // 1. GET LOGGED-IN USER
+            // =========================================================
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+            var userIdClaim = User.FindFirst("UserId");
+            var roleClaim = User.FindFirst("Role");
+
+            if (userIdClaim == null)
+                return Unauthorized("User ID not found in token.");
+
+            if (!int.TryParse(userIdClaim.Value, out int userId))
+                return BadRequest("Invalid user ID.");
+
+            string role = roleClaim?.Value ?? "";
+
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.UserId == userId);
+
+            if (user == null)
+                return BadRequest("User not found.");
+
+            // =========================================================
+            // 2. BASE QUERY
+            // =========================================================
 
             IQueryable<Goal> query = _context.Goal;
 
-            if (role == "3")
+            // =========================================================
+            // 3. ACCESS CONTROL
+            // =========================================================
+
+            // Director
+            if (role == "1")
             {
+                // Director can see everything
+                query = query;
+            }
+            // Manager
+            else if (role == "3")
+            {
+                // Manager can see:
+                // 1. Goals created by them
+                // 2. Goals assigned to users
+                //    in their department
+
+                var departmentUserIds = await _context.Users
+                    .Where(u => u.Department == user.Department)
+                    .Select(u => u.UserId)
+                    .ToListAsync();
+
+                var assignedGoalIds = await _context.GoalAssignment
+                    .Where(a => departmentUserIds.Contains(a.UserId))
+                    .Select(a => a.GoalId)
+                    .Distinct()
+                    .ToListAsync();
+
                 query = query.Where(g =>
-                    g.Assign_To == userId.ToString() ||
-                    g.Department == user.Department
+                    g.CreatedBy == userId ||
+                    assignedGoalIds.Contains(g.Id)
                 );
             }
-            else if (role != "1")
+            // Other roles
+            else
             {
+                // User can see goals assigned to them
+                var assignedGoalIds = await _context.GoalAssignment
+                    .Where(a => a.UserId == userId)
+                    .Select(a => a.GoalId)
+                    .Distinct()
+                    .ToListAsync();
+
                 query = query.Where(g =>
-                    g.Assign_To == userId.ToString()
+                    assignedGoalIds.Contains(g.Id) ||
+                    g.CreatedBy == userId
                 );
             }
 
+            // =========================================================
+            // 4. GET GOALS
+            // =========================================================
+
             var goals = await query
+                .OrderByDescending(g => g.Id)
                 .Select(g => new
                 {
-                    g.GoalCode,
-                    g.Title,
-                    g.Priority,
-                    g.Status,
-                    g.Progress,
-                    g.StartDate,
-                    g.DueDate,
-                    g.Department,
+                    // Goal information
+                    id = g.Id,
+                    goalCode = g.GoalCode,
+                    goalType = g.GoalType,
+                    parentGoalId = g.ParentGoalId,
+
+                    title = g.Title,
+                    priority = g.Priority,
+
+                    startDate = g.StartDate,
+                    dueDate = g.DueDate,
+                    completedDate = g.Completed_Date,
+
+                    status = g.Status,
+                    progress = g.Progress,
+                    goalpoints = g.Goalpoints,
+
+                    // Creator
+                    createdBy = g.CreatedBy,
+
+                    createdByName = _context.Users
+                        .Where(u => u.UserId == g.CreatedBy)
+                        .Select(u => u.Name)
+                        .FirstOrDefault(),
+
+                    createdByDepartment = _context.Users
+                        .Where(u => u.UserId == g.CreatedBy)
+                        .Select(u => u.Department)
+                        .FirstOrDefault(),
+
+                    // Parent yearly goal
+                    parentGoalCode = _context.Goal
+                        .Where(pg => pg.Id == g.ParentGoalId)
+                        .Select(pg => pg.GoalCode)
+                        .FirstOrDefault(),
+
+                    parentGoalTitle = _context.Goal
+                        .Where(pg => pg.Id == g.ParentGoalId)
+                        .Select(pg => pg.Title)
+                        .FirstOrDefault(),
+
+                    // Assigned users
+                    assignedUsers = _context.GoalAssignment
+                        .Where(a => a.GoalId == g.Id)
+                        .Join(
+                            _context.Users,
+                            a => a.UserId,
+                            u => u.UserId,
+                            (a, u) => new
+                            {
+                                userId = u.UserId,
+                                name = u.Name,
+                                email = u.Email,
+                                department = u.Department,
+                                role = u.Role
+                            }
+                        )
+                        .ToList()
                 })
                 .ToListAsync();
 
-            return Ok(goals);
+            // =========================================================
+            // 5. RETURN EVERYTHING
+            // =========================================================
+
+            return Ok(new
+            {
+                message = "Goals retrieved successfully.",
+                count = goals.Count,
+                goals
+            });
         }
 
-
+    
         [Authorize]
         [HttpGet("GetGoalsWithTasks")]
         public async Task<IActionResult> GetGoalsWithTasks()
         {
-            var userIdClaim = User.FindFirst("UserId");
-            var roleClaim = User.FindFirst("Role");
-
-            if (userIdClaim == null || roleClaim == null)
-                return Unauthorized("Invalid token");
-
-            int userId = int.Parse(userIdClaim.Value);
-            string role = roleClaim.Value;
-
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
-            if (user == null)
-                return BadRequest("User not found");
-
-            IQueryable<Goal> goalQuery = _context.Goal;
-
-            if (role != "1")
-                goalQuery = goalQuery.Where(g => g.Assign_To == userId.ToString());
-
-            var goals = await goalQuery
-                .OrderByDescending(g => g.Id)
-                .ToListAsync();
-
-            var goalCodes = goals.Select(g => g.GoalCode).ToList();
-
-            var tasks = await _context.Tasks
-                .Where(t => goalCodes.Contains(t.GoalCode))
-                .OrderByDescending(t => t.Created_At)
-                .ToListAsync();
-
-            var taskMembers = await _context.TaskMembers.ToListAsync();
-            var users = await _context.Users.ToListAsync();
-
-            var result = goals.Select(g =>
+            try
             {
-                var tasksForGoal = tasks
-                    .Where(t => t.GoalCode == g.GoalCode)
-                    .Select(t =>
-                    {
-                        var assignerMember = taskMembers
-                            .Where(tm => tm.TaskCode == t.TaskCode && !string.IsNullOrEmpty(tm.Assign_By))
-                            .Select(tm =>
-                            {
-                                var uId = int.Parse(tm.Assign_By.Split('-')[0]);
-                                var u = users.FirstOrDefault(x => x.UserId == uId);
+                // ============================================================
+                // 1. GET LOGGED-IN USER
+                // ============================================================
 
-                                return u == null ? null : new
-                                {
-                                    Name = u.Name,
-                                    Role = u.Role,
-                                    Department = u.Department
-                                };
-                            })
-                            .FirstOrDefault();
+                var userIdClaim = User.FindFirst("UserId")?.Value;
+                var roleClaim = User.FindFirst("Role")?.Value;
 
-                        var assignedToUsers = taskMembers
-                            .Where(tm => tm.TaskCode == t.TaskCode && !string.IsNullOrEmpty(tm.Assign_To))
-                            .Select(tm =>
-                            {
-                                var uId = int.Parse(tm.Assign_To.Split('-')[0]);
-                                var u = users.FirstOrDefault(x => x.UserId == uId);
+                if (!int.TryParse(userIdClaim, out int userId))
+                    return Unauthorized("Invalid UserId.");
 
-                                return u == null ? null : new
-                                {
-                                    userId = u.UserId,
-                                    name = u.Name,
-                                    department = u.Department,
-                                    role = u.Role
-                                };
-                            })
-                            .Where(x => x != null)
-                            .ToList();
-                    
-                        return new
-                        {
-                            taskCode = t.TaskCode,
-                            task = t.Task,
-                            description = t.Description,
-                            priority = t.Priority,
-                            status = t.Status,
-                            createdAt = t.Created_At,
-                            dueDate = t.Due_Date,
-                            totalMembers = t.Members,
-                            assignedBy = assignerMember?.Name ?? "N/A",
-                            assignerRole = assignerMember?.Role ?? "N/A",
-                            assignerDepartment = assignerMember?.Department ?? "N/A",
-                            assignedTo = assignedToUsers,
-                       
-                        };
-                    })
+                if (!int.TryParse(roleClaim, out int role))
+                    return Unauthorized("Invalid Role.");
+
+                // ============================================================
+                // 2. GET GOALS BASED ON ROLE
+                // ============================================================
+
+                List<Goal> goals;
+
+                if (role == 1) // Director
+                {
+                    // Director can see all goals
+                    goals = await _context.Goal
+                        .OrderByDescending(g => g.Id)
+                        .ToListAsync();
+                }
+                else
+                {
+                    // --------------------------------------------------------
+                    // STEP 1: Get goals directly assigned to logged-in user
+                    // --------------------------------------------------------
+
+                    var assignedGoalIds = await _context.GoalAssignment
+                        .Where(a => a.UserId == userId)
+                        .Select(a => a.GoalId)
+                        .Distinct()
+                        .ToListAsync();
+
+                    // --------------------------------------------------------
+                    // STEP 2: Get those assigned goals
+                    // --------------------------------------------------------
+
+                    var assignedGoals = await _context.Goal
+                        .Where(g => assignedGoalIds.Contains(g.Id))
+                        .ToListAsync();
+
+                    // --------------------------------------------------------
+                    // STEP 3: Find parent yearly goals
+                    // --------------------------------------------------------
+                    //
+                    // If user has:
+                    //
+                    // Monthly MG001
+                    //     ParentGoalId = 10
+                    //
+                    // then also include Goal Id 10.
+                    //
+                    // --------------------------------------------------------
+
+                    var parentGoalIds = assignedGoals
+                        .Where(g => g.ParentGoalId.HasValue)
+                        .Select(g => g.ParentGoalId!.Value)
+                        .Distinct()
+                        .ToList();
+
+                    // --------------------------------------------------------
+                    // STEP 4: Get parent yearly goals
+                    // --------------------------------------------------------
+
+                    var parentGoals = await _context.Goal
+                        .Where(g => parentGoalIds.Contains(g.Id))
+                        .ToListAsync();
+
+                    // --------------------------------------------------------
+                    // STEP 5: Combine assigned goals + parent yearly goals
+                    // --------------------------------------------------------
+
+                    goals = assignedGoals
+                        .Concat(parentGoals)
+                        .GroupBy(g => g.Id)
+                        .Select(g => g.First())
+                        .OrderByDescending(g => g.Id)
+                        .ToList();
+                }
+
+                // ============================================================
+                // 3. GET GOAL CODES
+                // ============================================================
+
+                var goalCodes = goals
+                    .Where(g => !string.IsNullOrWhiteSpace(g.GoalCode))
+                    .Select(g => g.GoalCode!)
+                    .Distinct()
                     .ToList();
 
-                return new
+                // ============================================================
+                // 4. GET TASKS
+                // ============================================================
+
+                var tasks = await _context.Tasks
+                    .Where(t => goalCodes.Contains(t.GoalCode))
+                    .ToListAsync();
+
+                // ============================================================
+                // 5. GET TASK MEMBERS
+                // ============================================================
+
+                var taskCodes = tasks
+                    .Where(t => !string.IsNullOrWhiteSpace(t.TaskCode))
+                    .Select(t => t.TaskCode!)
+                    .Distinct()
+                    .ToList();
+
+                var taskMembers = await _context.TaskMembers
+                    .Where(tm => taskCodes.Contains(tm.TaskCode))
+                    .ToListAsync();
+
+                // ============================================================
+                // 6. GET USERS
+                // ============================================================
+
+                var users = await _context.Users
+                    .ToListAsync();
+
+                // ============================================================
+                // 7. TASK RESPONSE
+                // ============================================================
+
+                object BuildTaskResponse(TaskTable task)
                 {
-                    g.GoalCode,
-                    g.Title,
-                    g.Priority,
-                    g.Status,
-                    g.Progress,
-                    g.StartDate,
-                    g.DueDate,
-                    g.Department,
+                    var members = taskMembers
+                        .Where(tm => tm.TaskCode == task.TaskCode)
+                        .Select(tm =>
+                        {
+                            var member = users.FirstOrDefault(
+                                u => u.UserId.ToString() == tm.Assign_To
+                            );
 
-                    g.Goalpoints,
+                            return new
+                            {
+                                userId = tm.Assign_To,
+                                name = member?.Name ?? "N/A",
+                                email = member?.Email ?? "N/A"
+                            };
+                        })
+                        .ToList();
 
-                    assignBy = users
-                        .Where(u => u.UserId.ToString() == g.Assign_By)
-                        .Select(u => $"{u.UserId}-{u.Name}")
-                        .FirstOrDefault(),
+                    return new
+                    {
+                        taskCode = task.TaskCode,
+                        goalCode = task.GoalCode,
+                        task = task.Task,
+                        description = task.Description,
+                        priority = task.Priority,
+                        status = task.Status,
+                        createdAt = task.Created_At,
+                        dueDate = task.Due_Date,
+                        completedDate = task.Completed_Date,
+                        members = members
+                    };
+                }
 
-                    assignTo = users
-                        .Where(u => u.UserId.ToString() == g.Assign_To)
-                        .Select(u => $"{u.UserId}-{u.Name}")
-                        .FirstOrDefault(),
+                // ============================================================
+                // 8. QUANTITY
+                // ============================================================
+                // IMPORTANT:
+                // Every goal uses its OWN TargetQuantity.
+                //
+                // Yearly:
+                //     TargetQuantity = yearly target
+                //
+                // Monthly:
+                //     TargetQuantity = monthly target
+                //
+                // We do NOT calculate yearly quantity from monthly goals.
+                // ============================================================
 
-                    taskCount = tasksForGoal.Count,
-                    tasks = tasksForGoal
-                };
-            });
+                int? GetPendingQuantity(Goal goal)
+                {
+                    if (!goal.TargetQuantity.HasValue)
+                        return null;
 
-            return Ok(result);
+                    int completed = goal.CompletedQuantity ?? 0;
+
+                    return Math.Max(
+                        0,
+                        goal.TargetQuantity.Value - completed
+                    );
+                }
+
+                // ============================================================
+                // 9. RESULT
+                // ============================================================
+
+                var result = new List<object>();
+
+                // ============================================================
+                // 10. YEARLY GOALS
+                // ============================================================
+
+                var yearlyGoals = goals
+                    .Where(g =>
+                        !string.IsNullOrWhiteSpace(g.GoalType) &&
+                        g.GoalType.Equals(
+                            "Yearly",
+                            StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var yearlyGoal in yearlyGoals)
+                {
+                    // ========================================================
+                    // YEARLY ASSIGNED USERS
+                    // ========================================================
+
+                    var yearlyAssignedUserIds = await _context.GoalAssignment
+                        .Where(a => a.GoalId == yearlyGoal.Id)
+                        .Select(a => a.UserId)
+                        .ToListAsync();
+
+                    var yearlyAssignedUsers = users
+                        .Where(u => yearlyAssignedUserIds.Contains(u.UserId))
+                        .Select(u => new
+                        {
+                            userId = u.UserId,
+                            name = u.Name,
+                            email = u.Email,
+                            department = u.Department
+                        })
+                        .ToList();
+
+                    // ========================================================
+                    // YEARLY TASKS
+                    // ========================================================
+
+                    var yearlyTasks = tasks
+                        .Where(t => t.GoalCode == yearlyGoal.GoalCode)
+                        .Select(BuildTaskResponse)
+                        .ToList();
+
+                    // ========================================================
+                    // MONTHLY GOALS UNDER THIS YEAR
+                    // ========================================================
+
+                    var monthlyGoals = goals
+                        .Where(g =>
+                            !string.IsNullOrWhiteSpace(g.GoalType) &&
+                            g.GoalType.Equals(
+                                "Monthly",
+                                StringComparison.OrdinalIgnoreCase) &&
+                            g.ParentGoalId == yearlyGoal.Id)
+                        .OrderBy(g => g.StartDate)
+                        .ToList();
+
+                    var monthlyResult = new List<object>();
+
+                    foreach (var monthlyGoal in monthlyGoals)
+                    {
+                        // ====================================================
+                        // MONTHLY ASSIGNED USERS
+                        // ====================================================
+
+                        var monthlyAssignedUserIds =
+                            await _context.GoalAssignment
+                                .Where(a => a.GoalId == monthlyGoal.Id)
+                                .Select(a => a.UserId)
+                                .ToListAsync();
+
+                        var monthlyAssignedUsers = users
+                            .Where(u => monthlyAssignedUserIds.Contains(u.UserId))
+                            .Select(u => new
+                            {
+                                userId = u.UserId,
+                                name = u.Name,
+                                email = u.Email,
+                                department = u.Department
+                            })
+                            .ToList();
+
+                        // ====================================================
+                        // MONTHLY CREATOR
+                        // ====================================================
+
+                        var monthlyCreator = users
+                            .FirstOrDefault(
+                                u => u.UserId == monthlyGoal.CreatedBy);
+
+                        // ====================================================
+                        // MONTHLY TASKS
+                        // ====================================================
+
+                        var monthlyTasks = tasks
+                            .Where(t => t.GoalCode == monthlyGoal.GoalCode)
+                            .Select(BuildTaskResponse)
+                            .ToList();
+
+                        // ====================================================
+                        // MONTHLY RESULT
+                        // ====================================================
+
+                        monthlyResult.Add(new
+                        {
+                            id = monthlyGoal.Id,
+
+                            goalCode = monthlyGoal.GoalCode,
+
+                            goalType = monthlyGoal.GoalType,
+
+                            parentGoalId = monthlyGoal.ParentGoalId,
+
+                            title = monthlyGoal.Title,
+
+                            priority = monthlyGoal.Priority,
+
+                            status = monthlyGoal.Status,
+
+                            progress = monthlyGoal.Progress,
+
+                            goalpoints = monthlyGoal.Goalpoints,
+
+                            // =================================================
+                            // MONTHLY QUANTITY
+                            // =================================================
+
+                            targetQuantity = monthlyGoal.TargetQuantity,
+
+                            completedQuantity = monthlyGoal.CompletedQuantity,
+
+                            pendingQuantity = GetPendingQuantity(monthlyGoal),
+
+                            // =================================================
+                            // DATES
+                            // =================================================
+
+                            startDate = monthlyGoal.StartDate,
+
+                            dueDate = monthlyGoal.DueDate,
+
+                            completedDate = monthlyGoal.Completed_Date,
+
+                            // =================================================
+                            // CREATOR
+                            // =================================================
+
+                            createdBy = monthlyGoal.CreatedBy,
+
+                            createdByName =
+                                monthlyCreator?.Name ?? "N/A",
+
+                            // =================================================
+                            // USERS
+                            // =================================================
+
+                            assignedUsers = monthlyAssignedUsers,
+
+                            // =================================================
+                            // TASKS
+                            // =================================================
+
+                            taskCount = monthlyTasks.Count,
+
+                            tasks = monthlyTasks
+                        });
+                    }
+
+                    // ========================================================
+                    // YEARLY CREATOR
+                    // ========================================================
+
+                    var yearlyCreator = users
+                        .FirstOrDefault(
+                            u => u.UserId == yearlyGoal.CreatedBy);
+
+                    // ========================================================
+                    // YEARLY RESULT
+                    // ========================================================
+
+                    result.Add(new
+                    {
+                        id = yearlyGoal.Id,
+
+                        goalCode = yearlyGoal.GoalCode,
+
+                        goalType = yearlyGoal.GoalType,
+
+                        parentGoalId = yearlyGoal.ParentGoalId,
+
+                        title = yearlyGoal.Title,
+
+                        priority = yearlyGoal.Priority,
+
+                        status = yearlyGoal.Status,
+
+                        progress = yearlyGoal.Progress,
+
+                        goalpoints = yearlyGoal.Goalpoints,
+
+                        // =====================================================
+                        // YEARLY QUANTITY
+                        // =====================================================
+                        // This is the value stored directly in the YEARLY goal.
+                        //
+                        // Example:
+                        // Upto 150 machine -> 150
+                        //
+                        // It is NOT calculated from monthly goals.
+                        // =====================================================
+
+                        targetQuantity = yearlyGoal.TargetQuantity,
+
+                        completedQuantity = yearlyGoal.CompletedQuantity,
+
+                        pendingQuantity = GetPendingQuantity(yearlyGoal),
+
+                        // =====================================================
+                        // DATES
+                        // =====================================================
+
+                        startDate = yearlyGoal.StartDate,
+
+                        dueDate = yearlyGoal.DueDate,
+
+                        completedDate = yearlyGoal.Completed_Date,
+
+                        // =====================================================
+                        // CREATOR
+                        // =====================================================
+
+                        createdBy = yearlyGoal.CreatedBy,
+
+                        createdByName =
+                            yearlyCreator?.Name ?? "N/A",
+
+                        // =====================================================
+                        // USERS
+                        // =====================================================
+
+                        assignedUsers = yearlyAssignedUsers,
+
+                        // =====================================================
+                        // TASKS
+                        // =====================================================
+
+                        taskCount = yearlyTasks.Count,
+
+                        tasks = yearlyTasks,
+
+                        // =====================================================
+                        // MONTHLY GOALS
+                        // =====================================================
+
+                        monthlyGoals = monthlyResult
+                    });
+                }
+
+                // ============================================================
+                // 11. STANDALONE MONTHLY GOALS
+                // ============================================================
+
+                var standaloneMonthlyGoals = goals
+                    .Where(g =>
+                        !string.IsNullOrWhiteSpace(g.GoalType) &&
+                        g.GoalType.Equals(
+                            "Monthly",
+                            StringComparison.OrdinalIgnoreCase) &&
+                        g.ParentGoalId == null)
+                    .OrderBy(g => g.StartDate)
+                    .ToList();
+
+                foreach (var monthlyGoal in standaloneMonthlyGoals)
+                {
+                    // ========================================================
+                    // ASSIGNED USERS
+                    // ========================================================
+
+                    var assignedUserIds = await _context.GoalAssignment
+                        .Where(a => a.GoalId == monthlyGoal.Id)
+                        .Select(a => a.UserId)
+                        .ToListAsync();
+
+                    var assignedUsers = users
+                        .Where(u => assignedUserIds.Contains(u.UserId))
+                        .Select(u => new
+                        {
+                            userId = u.UserId,
+                            name = u.Name,
+                            email = u.Email,
+                            department = u.Department
+                        })
+                        .ToList();
+
+                    // ========================================================
+                    // CREATOR
+                    // ========================================================
+
+                    var creator = users
+                        .FirstOrDefault(
+                            u => u.UserId == monthlyGoal.CreatedBy);
+
+                    // ========================================================
+                    // TASKS
+                    // ========================================================
+
+                    var monthlyTasks = tasks
+                        .Where(t => t.GoalCode == monthlyGoal.GoalCode)
+                        .Select(BuildTaskResponse)
+                        .ToList();
+
+                    // ========================================================
+                    // STANDALONE MONTHLY RESULT
+                    // ========================================================
+
+                    result.Add(new
+                    {
+                        id = monthlyGoal.Id,
+
+                        goalCode = monthlyGoal.GoalCode,
+
+                        goalType = monthlyGoal.GoalType,
+
+                        parentGoalId = monthlyGoal.ParentGoalId,
+
+                        title = monthlyGoal.Title,
+
+                        priority = monthlyGoal.Priority,
+
+                        status = monthlyGoal.Status,
+
+                        progress = monthlyGoal.Progress,
+
+                        goalpoints = monthlyGoal.Goalpoints,
+
+                        // =====================================================
+                        // MONTHLY QUANTITY
+                        // =====================================================
+
+                        targetQuantity = monthlyGoal.TargetQuantity,
+
+                        completedQuantity = monthlyGoal.CompletedQuantity,
+
+                        pendingQuantity = GetPendingQuantity(monthlyGoal),
+
+                        // =====================================================
+                        // DATES
+                        // =====================================================
+
+                        startDate = monthlyGoal.StartDate,
+
+                        dueDate = monthlyGoal.DueDate,
+
+                        completedDate = monthlyGoal.Completed_Date,
+
+                        // =====================================================
+                        // CREATOR
+                        // =====================================================
+
+                        createdBy = monthlyGoal.CreatedBy,
+
+                        createdByName =
+                            creator?.Name ?? "N/A",
+
+                        // =====================================================
+                        // USERS
+                        // =====================================================
+
+                        assignedUsers = assignedUsers,
+
+                        // =====================================================
+                        // TASKS
+                        // =====================================================
+
+                        taskCount = monthlyTasks.Count,
+
+                        tasks = monthlyTasks,
+
+                        monthlyGoals = new List<object>()
+                    });
+                }
+
+                // ============================================================
+                // 12. RETURN
+                // ============================================================
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(
+                    500,
+                    new
+                    {
+                        message = "Error while getting goals with tasks.",
+                        error = ex.Message
+                    });
+            }
         }
 
-
+        [Authorize]
         [HttpGet("tasks")]
         public async Task<IActionResult> GetAllTasks()
         {
+            // =====================================================
+            // 1. GET ALL TASKS
+            // =====================================================
+
             var tasks = await _context.Tasks
                 .OrderByDescending(t => t.Created_At)
                 .ToListAsync();
 
-            var taskMembers = await _context.TaskMembers.ToListAsync();
-            var users = await _context.Users.ToListAsync();
+
+            // =====================================================
+            // 2. GET TASK MEMBERS
+            // =====================================================
+
+            var taskMembers = await _context.TaskMembers
+                .ToListAsync();
+
+
+            // =====================================================
+            // 3. GET USERS
+            // =====================================================
+
+            var users = await _context.Users
+                .ToListAsync();
+
+
+            // =====================================================
+            // 4. BUILD TASK RESPONSE
+            // =====================================================
 
             var result = tasks.Select(t =>
             {
+                // -------------------------------------------------
+                // ASSIGNER
+                // -------------------------------------------------
 
                 var assignerMember = taskMembers
-                    .Where(tm => tm.TaskCode == t.TaskCode && !string.IsNullOrEmpty(tm.Assign_By))
-                    .Select(tm =>
-                    {
-                        var userId = int.Parse(tm.Assign_By.Split('-')[0]);
-                        var user = users.FirstOrDefault(u => u.UserId == userId);
-                        return user == null ? null : new
-                        {
-                            Name = user.Name,
-                            Role = user.Role,
-                            Department = user.Department
-                        };
-                    })
+                    .Where(tm =>
+                        tm.TaskCode == t.TaskCode &&
+                        !string.IsNullOrWhiteSpace(tm.Assign_By))
                     .FirstOrDefault();
 
+                object? assigner = null;
+
+                string assignerDepartment = "N/A";
 
 
-
-                return new
+                if (assignerMember != null)
                 {
-                    taskCode = t.TaskCode,
-                    task = t.Task,
-                    description = t.Description,
-                    priority = t.Priority,
-                    status = t.Status,
-                    createdAt = t.Created_At,
-                    dueDate = t.Due_Date,
-                    totalMembers = t.Members,
-                    
-                    assignedBy = assignerMember?.Name ?? "N/A",
-                    assignerRole = assignerMember?.Role ?? "N/A",
-                    assignerDepartment = assignerMember?.Department ?? "N/A",
+                    var assignerIdString =
+                        assignerMember.Assign_By
+                            .Split('-', 2)[0];
 
-                    assignedTo = taskMembers
-                    .Where(tm => tm.TaskCode == t.TaskCode && !string.IsNullOrEmpty(tm.Assign_To))
+                    if (int.TryParse(
+                            assignerIdString,
+                            out int assignerId))
+                    {
+                        var assignerUser = users
+                            .FirstOrDefault(u =>
+                                u.UserId == assignerId);
+
+                        if (assignerUser != null)
+                        {
+                            assigner = new
+                            {
+                                userId = assignerUser.UserId,
+                                name = assignerUser.Name,
+                                email = assignerUser.Email,
+                                department = assignerUser.Department,
+                                role = assignerUser.Role
+                            };
+
+                            assignerDepartment =
+                                assignerUser.Department ?? "N/A";
+                        }
+                    }
+                }
+
+
+                // -------------------------------------------------
+                // PENDING QUANTITY
+                // -------------------------------------------------
+
+                int? pendingQuantity = null;
+
+                if (t.Quantity.HasValue)
+                {
+                    pendingQuantity = Math.Max(
+                        0,
+                        t.Quantity.Value -
+                        (t.CompletedQuantity ?? 0)
+                    );
+                }
+
+
+                // -------------------------------------------------
+                // ASSIGNED USERS
+                // -------------------------------------------------
+
+                var assignedTo = taskMembers
+                    .Where(tm =>
+                        tm.TaskCode == t.TaskCode &&
+                        !string.IsNullOrWhiteSpace(tm.Assign_To))
                     .Select(tm =>
                     {
-                        var userId = int.Parse(tm.Assign_To.Split('-')[0]);
-                        var user = users.FirstOrDefault(u => u.UserId == userId);
+                        var userIdString =
+                            tm.Assign_To
+                                .Split('-', 2)[0];
 
-                        return user == null ? null : new
+                        if (!int.TryParse(
+                                userIdString,
+                                out int userId))
+                        {
+                            return null;
+                        }
+
+                        var user = users
+                            .FirstOrDefault(u =>
+                                u.UserId == userId);
+
+                        if (user == null)
+                            return null;
+
+                        return new
                         {
                             userId = user.UserId,
                             name = user.Name,
+                            email = user.Email,
                             department = user.Department,
-                            role = user.Role
+                            role = user.Role,
+
+                            taskMemberCode = tm.TMCode,
+
+                            userStatus = tm.UserStatus,
+
+                            assignedAt = tm.Assigned_At,
+
+                            assignedBy = tm.Assign_By
                         };
                     })
                     .Where(x => x != null)
-                    .ToList()
-                };
-            });
+                    .ToList();
 
-            var totalTasks = await _context.Tasks.CountAsync();
-            var pendingCount = await _context.Tasks.CountAsync(t => t.Status == "Pending");
-            var inProgressCount = await _context.Tasks.CountAsync(t => t.Status == "In Progress");
-            var completedCount = await _context.Tasks.CountAsync(t => t.Status == "Completed");
+
+                // -------------------------------------------------
+                // FINAL TASK
+                // -------------------------------------------------
+
+                return new
+                {
+                    // =============================================
+                    // BASIC TASK DETAILS
+                    // =============================================
+
+                    taskCode = t.TaskCode,
+
+                    task = t.Task,
+
+                    goalCode = t.GoalCode,
+
+                    description = t.Description,
+
+                    priority = t.Priority,
+
+                    status = t.Status,
+
+
+                    // =============================================
+                    // DATES
+                    // =============================================
+
+                    createdAt = t.Created_At,
+
+                    dueDate = t.Due_Date,
+
+                    completedDate =
+                        t.Completed_Date == default(DateTime)
+                            ? (DateTime?)null
+                            : t.Completed_Date,
+
+
+                    // =============================================
+                    // MEMBERS
+                    // =============================================
+
+                    totalMembers = t.Members,
+
+                    assignedTo = assignedTo,
+
+
+                    // =============================================
+                    // ASSIGNER
+                    // =============================================
+
+                    assignedBy = assigner,
+
+                    assignerDepartment = assignerDepartment,
+
+
+                    // =============================================
+                    // EDIT STATUS
+                    // =============================================
+
+                    wasEdited = t.wasEdited,
+
+
+                    // =============================================
+                    // PERFORMANCE
+                    // =============================================
+
+                    performanceType = t.PerformanceType,
+
+
+                    // =============================================
+                    // QUANTITY
+                    // =============================================
+
+                    quantity = t.Quantity,
+
+                    completedQuantity = t.CompletedQuantity,
+
+                    pendingQuantity = pendingQuantity,
+
+
+                    // =============================================
+                    // TIME
+                    // =============================================
+
+                    startTime = t.StartTime,
+
+                    endTime = t.EndTime
+                };
+            }).ToList();
+
+
+            // =====================================================
+            // 5. TASK STATUS COUNTS
+            // =====================================================
+
+            int totalTasks = tasks.Count;
+
+            int pendingCount = tasks.Count(t =>
+                !string.IsNullOrWhiteSpace(t.Status) &&
+                t.Status.Trim().Equals(
+                    "pending",
+                    StringComparison.OrdinalIgnoreCase)
+            );
+
+            int notStartedCount = tasks.Count(t =>
+                !string.IsNullOrWhiteSpace(t.Status) &&
+                t.Status.Trim().Equals(
+                    "not started",
+                    StringComparison.OrdinalIgnoreCase)
+            );
+
+            int inProgressCount = tasks.Count(t =>
+                !string.IsNullOrWhiteSpace(t.Status) &&
+                (
+                    t.Status.Trim().Equals(
+                        "inprogress",
+                        StringComparison.OrdinalIgnoreCase)
+                    ||
+                    t.Status.Trim().Equals(
+                        "in progress",
+                        StringComparison.OrdinalIgnoreCase)
+                )
+            );
+
+            int completedCount = tasks.Count(t =>
+                !string.IsNullOrWhiteSpace(t.Status) &&
+                t.Status.Trim().Equals(
+                    "completed",
+                    StringComparison.OrdinalIgnoreCase)
+            );
+
+
+            // =====================================================
+            // 6. FINAL RESPONSE
+            // =====================================================
 
             return Ok(new
             {
                 totalTasks,
+
                 pendingCount,
+
+                notStartedCount,
+
                 inProgressCount,
+
                 completedCount,
+
                 result
             });
         }
 
-
+        [Authorize]
         [HttpGet("taskbyid/{taskCode}")]
         public async Task<IActionResult> GetTaskByCode(string taskCode)
         {
+            // =====================================================
+            // 1. GET TASK
+            // =====================================================
+
             var task = await _context.Tasks
-                .Where(t => t.TaskCode == taskCode)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(t => t.TaskCode == taskCode);
 
             if (task == null)
                 return NotFound("Task not found");
+
+
+            // =====================================================
+            // 2. GET TASK MEMBERS
+            // =====================================================
 
             var taskMembers = await _context.TaskMembers
                 .Where(tm => tm.TaskCode == taskCode)
                 .ToListAsync();
 
-            var users = await _context.Users.ToListAsync();
+
+            // =====================================================
+            // 3. GET QUANTITY SPLITS
+            // =====================================================
+
+            var quantitySplits = await _context.TaskQuantitySplit
+                .Where(s => s.TaskCode == taskCode)
+                .OrderBy(s => s.Id)
+                .ToListAsync();
+
+
+            // =====================================================
+            // 4. GET ALL USER IDS FROM TASK MEMBERS
+            // =====================================================
+
+            var assignedUserIds = taskMembers
+                .Where(tm => !string.IsNullOrWhiteSpace(tm.Assign_To))
+                .Select(tm =>
+                {
+                    var firstPart = tm.Assign_To
+                        .Split('-', 2)[0];
+
+                    return int.TryParse(firstPart, out int id)
+                        ? (int?)id
+                        : null;
+                })
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToList();
+
+
+            // =====================================================
+            // 5. GET USERS
+            // =====================================================
+
+            var assignedUsers = await _context.Users
+                .Where(u => assignedUserIds.Contains(u.UserId))
+                .ToListAsync();
+
+
+            // =====================================================
+            // 6. GET ASSIGNER ID
+            // =====================================================
 
             var assignedByString = taskMembers
-        .Select(tm => tm.Assign_By)
-        .FirstOrDefault();
+                .Select(tm => tm.Assign_By)
+                .FirstOrDefault(x =>
+                    !string.IsNullOrWhiteSpace(x));
 
-            string assignedByDepartment = null;
-            if (!string.IsNullOrEmpty(assignedByString))
+            int? assignedById = null;
+
+            if (!string.IsNullOrWhiteSpace(assignedByString))
             {
-                var assignById = int.Parse(assignedByString.Split('-')[0]);
-                var user = users.FirstOrDefault(u => u.UserId == assignById);
-                assignedByDepartment = user?.Department ?? "N/A";
+                var firstPart = assignedByString
+                    .Split('-', 2)[0];
+
+                if (int.TryParse(firstPart, out int parsedId))
+                {
+                    assignedById = parsedId;
+                }
             }
 
-            var result = new
+
+            // =====================================================
+            // 7. GET ASSIGNER
+            // =====================================================
+
+            var assignedByUser = assignedById.HasValue
+                ? await _context.Users
+                    .FirstOrDefaultAsync(u =>
+                        u.UserId == assignedById.Value)
+                : null;
+
+
+            // =====================================================
+            // 8. BUILD NORMAL ASSIGNED USER LIST
+            //
+            // This is used for normal tasks.
+            // =====================================================
+
+            var assignedTo = taskMembers
+                .Where(tm =>
+                    !string.IsNullOrWhiteSpace(tm.Assign_To))
+                .Select(tm =>
+                {
+                    var firstPart = tm.Assign_To
+                        .Split('-', 2)[0];
+
+                    if (!int.TryParse(
+                            firstPart,
+                            out int memberUserId))
+                    {
+                        return null;
+                    }
+
+                    var memberUser = assignedUsers
+                        .FirstOrDefault(u =>
+                            u.UserId == memberUserId);
+
+                    if (memberUser == null)
+                        return null;
+
+                    return new
+                    {
+                        userId = memberUser.UserId,
+
+                        name = memberUser.Name,
+
+                        email = memberUser.Email,
+
+                        department = memberUser.Department,
+
+                        role = memberUser.Role,
+
+                        taskMemberCode = tm.TMCode,
+
+                        userStatus = tm.UserStatus,
+
+                        assignedAt = tm.Assigned_At,
+
+                        assignedBy = tm.Assign_By,
+
+                        splitId = tm.SplitId
+                    };
+                })
+                .Where(x => x != null)
+                .ToList();
+
+
+            // =====================================================
+            // 9. BUILD SPLIT RESPONSE
+            //
+            // IMPORTANT:
+            // Each split gets ONLY the users assigned to that split.
+            // =====================================================
+
+            var splitResponse = quantitySplits
+                .Select(split =>
+                {
+                    var splitMembers = taskMembers
+                        .Where(tm =>
+                            tm.SplitId.HasValue &&
+                            tm.SplitId.Value == split.Id)
+                        .ToList();
+
+                    var members = splitMembers
+                        .Select(tm =>
+                        {
+                            if (string.IsNullOrWhiteSpace(
+                                tm.Assign_To))
+                            {
+                                return null;
+                            }
+
+                            var firstPart = tm.Assign_To
+                                .Split('-', 2)[0];
+
+                            if (!int.TryParse(
+                                    firstPart,
+                                    out int memberUserId))
+                            {
+                                return null;
+                            }
+
+                            var memberUser = assignedUsers
+                                .FirstOrDefault(u =>
+                                    u.UserId == memberUserId);
+
+                            if (memberUser == null)
+                                return null;
+
+                            return new
+                            {
+                                userId = memberUser.UserId,
+
+                                name = memberUser.Name,
+
+                                email = memberUser.Email,
+
+                                department = memberUser.Department,
+
+                                role = memberUser.Role,
+
+                                taskMemberCode = tm.TMCode,
+
+                                userStatus = tm.UserStatus,
+
+                                assignedAt = tm.Assigned_At,
+
+                                assignedBy = tm.Assign_By,
+
+                                splitId = tm.SplitId
+                            };
+                        })
+                        .Where(x => x != null)
+                        .ToList();
+
+
+                    // =================================================
+                    // CHECK WHETHER ALL MEMBERS COMPLETED
+                    // =================================================
+
+                    bool allMembersCompleted =
+                        members.Any() &&
+                        members.All(m =>
+                            !string.IsNullOrWhiteSpace(
+                                m!.userStatus) &&
+                            m.userStatus.Trim().Equals(
+                                "completed",
+                                StringComparison.OrdinalIgnoreCase));
+
+
+                    // =================================================
+                    // CHECK QUANTITY COMPLETED
+                    // =================================================
+
+                    bool quantityCompleted =
+                        split.CompletedQuantity >= split.Quantity;
+
+
+                    // =================================================
+                    // SPLIT STATUS
+                    // =================================================
+
+                    string splitStatus;
+
+                    if (allMembersCompleted &&
+                        quantityCompleted)
+                    {
+                        splitStatus = "completed";
+                    }
+                    else if (
+                        split.CompletedQuantity > 0 ||
+                        members.Any(m =>
+                            !string.IsNullOrWhiteSpace(
+                                m!.userStatus) &&
+                            !m.userStatus.Trim().Equals(
+                                "notstarted",
+                                StringComparison.OrdinalIgnoreCase) &&
+                            !m.userStatus.Trim().Equals(
+                                "not started",
+                                StringComparison.OrdinalIgnoreCase)))
+                    {
+                        splitStatus = "inprogress";
+                    }
+                    else
+                    {
+                        splitStatus = "not started";
+                    }
+
+
+                    return new
+                    {
+                        id = split.Id,
+
+                        quantity = split.Quantity,
+
+                        completedQuantity =
+                            split.CompletedQuantity,
+
+                        pendingQuantity = Math.Max(
+                            0,
+                            split.Quantity -
+                            split.CompletedQuantity),
+
+                        status = splitStatus,
+
+                        memberCount = members.Count,
+
+                        members = members
+                    };
+                })
+                .ToList();
+
+
+            // =====================================================
+            // 10. PENDING TOTAL QUANTITY
+            // =====================================================
+
+            int? pendingQuantity = null;
+
+            if (task.Quantity.HasValue)
+            {
+                int completedQuantity =
+                    task.CompletedQuantity ?? 0;
+
+                pendingQuantity = Math.Max(
+                    0,
+                    task.Quantity.Value -
+                    completedQuantity);
+            }
+
+
+            // =====================================================
+            // 11. RETURN TASK
+            // =====================================================
+
+            return Ok(new
             {
                 taskCode = task.TaskCode,
+
                 task = task.Task,
+
+                goalCode = task.GoalCode,
+
                 description = task.Description,
+
                 priority = task.Priority,
+
                 status = task.Status,
+
                 createdAt = task.Created_At,
+
                 dueDate = task.Due_Date,
-                totalMembers = task.Members,
+
+                completedDate =
+                    task.Completed_Date == default(DateTime)
+                        ? (DateTime?)null
+                        : task.Completed_Date,
+
                 wasEdited = task.wasEdited,
-                completed_date = task.Completed_Date,
-                performanceType = task.PerformanceType,
-                quantity = task.Quantity,
-                startTime = task.StartTime,
-                endTime = task.EndTime,
-                assignedBy = taskMembers
-                    .Select(tm => tm.Assign_By)
-                    .FirstOrDefault(),
-                assignerDepartment = assignedByDepartment,
-                assignedTo = taskMembers
-                    .Where(tm => !string.IsNullOrEmpty(tm.Assign_To))
-                    .Select(tm =>
+
+
+                // =================================================
+                // MEMBERS
+                // =================================================
+
+                totalMembers = task.Members,
+
+                assignedTo = assignedTo,
+
+
+                // =================================================
+                // ASSIGNER
+                // =================================================
+
+                assignedBy = assignedByUser == null
+                    ? null
+                    : new
                     {
-                        var userId = int.Parse(tm.Assign_To.Split('-')[0]);
-                        var user = users.FirstOrDefault(u => u.UserId == userId);
+                        userId = assignedByUser.UserId,
 
-                        return user == null ? null : new
-                        {
-                            userId = user.UserId,
-                            name = user.Name,
-                            department = user.Department,
-                            role = user.Role
-                        };
-                    })
-                    .Where(x => x != null)
-                    .ToList()
-            };
+                        name = assignedByUser.Name,
 
-            return Ok(result);
+                        email = assignedByUser.Email,
+
+                        department = assignedByUser.Department,
+
+                        role = assignedByUser.Role
+                    },
+
+                assignerDepartment =
+                    assignedByUser?.Department,
+
+
+                // =================================================
+                // PERFORMANCE
+                // =================================================
+
+                performanceType =
+                    task.PerformanceType,
+
+
+                // =================================================
+                // TOTAL QUANTITY
+                // =================================================
+
+                quantity = task.Quantity,
+
+                completedQuantity =
+                    task.CompletedQuantity,
+
+                pendingQuantity =
+                    pendingQuantity,
+
+
+                // =================================================
+                // QUANTITY SPLITS
+                // =================================================
+
+                hasQuantitySplits =
+                    quantitySplits.Any(),
+
+                quantitySplits =
+                    splitResponse,
+
+
+                // =================================================
+                // TIME
+                // =================================================
+
+                startTime = task.StartTime,
+
+                endTime = task.EndTime
+            });
         }
 
 
-      [Authorize]
+        [Authorize]
       [HttpPut("update-usersstatus/{userid}")]
       public async Task<IActionResult> UpdateAdminStatus(int userid,[FromBody] StatusUpdateDto dto)
     {

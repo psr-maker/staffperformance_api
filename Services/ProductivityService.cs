@@ -81,7 +81,7 @@ namespace StaffWork_Track.Services
 
             var goalScores = await _context.Goal
                 .Where(g =>
-                    g.Assign_To == staffId.ToString() &&
+                   // g.Assign_To == staffId.ToString() &&
                     g.Completed_Date.HasValue &&
                     g.Completed_Date.Value.Month == month &&
                     g.Completed_Date.Value.Year == year &&

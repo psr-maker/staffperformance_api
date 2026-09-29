@@ -1,4 +1,5 @@
 ﻿
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using staff_work_tracking.Data;
@@ -57,289 +58,378 @@ namespace staff.Controllers
             {
                 var today = DateTime.Today;
 
-                // ================= USERS =================
+                // ============================================================
+                // 1. USERS IN DEPARTMENT
+                // ============================================================
+
                 var users = await _context.Users
-                    .Where(u => u.Department == departmentName)
-                    .Select(u => new { u.UserId, u.Name })
+                    .Where(u =>
+                        u.Department != null &&
+                        u.Department.Trim().ToLower() ==
+                        departmentName.Trim().ToLower())
+                    .Select(u => new
+                    {
+                        u.UserId,
+                        u.Name,
+                        u.Department
+                    })
                     .ToListAsync();
 
                 var totalUsers = users.Count;
 
-                // ================= GOALS =================
-                var goalsQuery = _context.Goal
-                    .Where(g => g.Department == departmentName);
+                var departmentUserIds = users
+                    .Select(u => u.UserId)
+                    .ToList();
 
-                if (fromDate.HasValue && toDate.HasValue)
-                {
-                    var start = fromDate.Value.Date;
-                    var end = toDate.Value.Date.AddDays(1).AddTicks(-1);
+                // ============================================================
+                // 2. GET GOAL ASSIGNMENTS
+                // ============================================================
 
-                    goalsQuery = goalsQuery
-                        .Where(g => g.StartDate >= start && g.StartDate <= end);
-                }
-
-                var goals = await goalsQuery.ToListAsync();
-
-                var goalCodes = goals.Select(g => g.GoalCode).ToList();
-
-                // ================= TASKS =================
-                var tasks = await _context.Tasks
-                    .Where(t => goalCodes.Contains(t.GoalCode))
+                var assignedGoalIds = await _context.GoalAssignment
+                    .Where(a => departmentUserIds.Contains(a.UserId))
+                    .Select(a => a.GoalId)
+                    .Distinct()
                     .ToListAsync();
 
-                var taskCodes = tasks.Select(t => t.TaskCode).ToList();
+                // ============================================================
+                // 3. GET ASSIGNED GOALS
+                // ============================================================
 
-                // ================= TASK MEMBERS =================
+                var goals = await _context.Goal
+                    .Where(g => assignedGoalIds.Contains(g.Id))
+                    .ToListAsync();
+
+                // ============================================================
+                // 4. INCLUDE YEARLY PARENT GOALS
+                //
+                // If a Monthly goal is assigned to department users,
+                // include its Yearly parent also.
+                // ============================================================
+
+                var parentGoalIds = goals
+                    .Where(g =>
+                        g.ParentGoalId.HasValue &&
+                        g.ParentGoalId.Value > 0)
+                    .Select(g => g.ParentGoalId.Value)
+                    .Distinct()
+                    .ToList();
+
+                if (parentGoalIds.Any())
+                {
+                    var parentGoals = await _context.Goal
+                        .Where(g => parentGoalIds.Contains(g.Id))
+                        .ToListAsync();
+
+                    var existingGoalIds = goals
+                        .Select(g => g.Id)
+                        .ToHashSet();
+
+                    foreach (var parentGoal in parentGoals)
+                    {
+                        if (!existingGoalIds.Contains(parentGoal.Id))
+                        {
+                            goals.Add(parentGoal);
+                        }
+                    }
+                }
+
+                // ============================================================
+                // 5. DATE FILTER
+                // ============================================================
+
+                if (fromDate.HasValue || toDate.HasValue)
+                {
+                    DateTime? startDate =
+                        fromDate.HasValue
+                            ? fromDate.Value.Date
+                            : null;
+
+                    DateTime? endDate =
+                        toDate.HasValue
+                            ? toDate.Value.Date
+                            : null;
+
+                    goals = goals
+                        .Where(g =>
+                            (!startDate.HasValue ||
+                             g.StartDate.Date >= startDate.Value) &&
+
+                            (!endDate.HasValue ||
+                             g.StartDate.Date <= endDate.Value))
+                        .ToList();
+                }
+
+                // ============================================================
+                // 6. GOAL CODES
+                // ============================================================
+
+                var goalCodes = goals
+                    .Where(g => !string.IsNullOrWhiteSpace(g.GoalCode))
+                    .Select(g => g.GoalCode)
+                    .Distinct()
+                    .ToList();
+
+                // ============================================================
+                // 7. TASKS
+                // ============================================================
+
+                var tasks = await _context.Tasks
+                    .Where(t =>
+                        t.GoalCode != null &&
+                        goalCodes.Contains(t.GoalCode))
+                    .ToListAsync();
+
+                // ============================================================
+                // 8. TASK CODES
+                // ============================================================
+
+                var taskCodes = tasks
+                    .Where(t => !string.IsNullOrWhiteSpace(t.TaskCode))
+                    .Select(t => t.TaskCode)
+                    .Distinct()
+                    .ToList();
+
+                // ============================================================
+                // 9. TASK MEMBERS
+                // ============================================================
+
                 var taskMembers = await _context.TaskMembers
                     .Where(tm => taskCodes.Contains(tm.TaskCode))
                     .ToListAsync();
 
-                // ================= GOAL CALCULATIONS =================
+                // ============================================================
+                // 10. GOAL CALCULATIONS
+                // ============================================================
+
                 int totalGoals = goals.Count;
 
                 int completedGoals = goals.Count(g =>
-                    (g.Status ?? "").ToLower() == "completed");
+                    string.Equals(
+                        g.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
 
                 int pendingGoals = goals.Count(g =>
-                    (g.Status ?? "").ToLower() != "completed");
+                    !string.Equals(
+                        g.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
 
                 int overdueGoals = goals.Count(g =>
-                    g.DueDate < today &&
-                    (g.Status ?? "").ToLower() != "completed");
+                    g.DueDate.Date < today &&
+                    !string.Equals(
+                        g.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
 
                 double goalCompletionPercentage =
                     totalGoals > 0
-                        ? Math.Round((double)completedGoals * 100 / totalGoals, 2)
+                        ? Math.Round(
+                            (double)completedGoals * 100 / totalGoals,
+                            2)
                         : 0;
 
-                // ✅ ON TIME GOAL COMPLETION
+                // ============================================================
+                // 11. ON-TIME GOAL COMPLETION
+                // ============================================================
+
                 int onTimeGoals = goals.Count(g =>
-                    (g.Status ?? "").ToLower() == "completed" &&
-                    g.Completed_Date != null &&
-                    g.Completed_Date <= g.DueDate);
+                    string.Equals(
+                        g.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    g.Completed_Date.HasValue &&
+                    g.Completed_Date.Value <= g.DueDate);
 
                 double onTimePercentage =
                     completedGoals > 0
-                        ? Math.Round((double)onTimeGoals * 100 / completedGoals, 2)
+                        ? Math.Round(
+                            (double)onTimeGoals * 100 / completedGoals,
+                            2)
                         : 0;
 
-                // ================= TASK CALCULATIONS =================
-                int totalTasks = tasks.Count;
-
-                int completedTasks = tasks.Count(t =>
-                    (t.Status ?? "").ToLower() == "completed");
-
-                int pendingTasks = tasks.Count(t =>
-                    (t.Status ?? "").ToLower() != "completed");
-
-                int overdueTasks = tasks.Count(t =>
-                    t.Due_Date < today &&
-                    (t.Status ?? "").ToLower() != "completed");
-
-                // ================= DELAYED GOAL % =================
+                // ============================================================
+                // 12. DELAYED COMPLETED GOALS
+                // ============================================================
 
                 var completedGoalsList = goals
                     .Where(g =>
-                        (g.Status ?? "").ToLower() == "completed" &&
-                        g.Completed_Date != null &&
-                        g.DueDate != null)
+                        string.Equals(
+                            g.Status,
+                            "Completed",
+                            StringComparison.OrdinalIgnoreCase) &&
+                        g.Completed_Date.HasValue)
                     .ToList();
 
                 int delayedGoals = completedGoalsList.Count(g =>
-                    g.Completed_Date > g.DueDate);
+                    g.Completed_Date!.Value > g.DueDate);
 
-                double delayedGoalPercentage = completedGoalsList.Any()
-                    ? Math.Round((double)delayedGoals * 100 / completedGoalsList.Count, 2)
-                    : 0;
+                double delayedGoalPercentage =
+                    completedGoalsList.Count > 0
+                        ? Math.Round(
+                            (double)delayedGoals *
+                            100 /
+                            completedGoalsList.Count,
+                            2)
+                        : 0;
 
-                // ================= TOP / LOW PERFORMER (TASK BASED) =================
-                // ================= TOP / LOW PERFORMER =================
+                // ============================================================
+                // 13. TASK CALCULATIONS
+                // ============================================================
 
-                //int GetPriorityWeight(string? priority)
-                //{
-                //    return priority?.ToLower() switch
-                //    {
-                //        "high" => 100,
-                //        "medium" => 70,
-                //        "low" => 40,
-                //        _ => 40
-                //    };
-                //}
+                int totalTasks = tasks.Count;
 
-                //var performerStats = new List<dynamic>();
+                int completedTasks = tasks.Count(t =>
+                    string.Equals(
+                        t.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
 
-                //foreach (var u in users)
-                //{
-                //    // Exact user match: "5-Abay" => userId = 5
-                //    var userTaskCodes = taskMembers
-                //        .Where(tm =>
-                //            !string.IsNullOrEmpty(tm.Assign_To) &&
-                //            tm.Assign_To.StartsWith($"{u.UserId}-"))
-                //        .Select(tm => tm.TaskCode)
-                //        .Distinct()
-                //        .ToList();
+                int pendingTasks = tasks.Count(t =>
+                    !string.Equals(
+                        t.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
 
-                //    var assignedTasks = tasks
-                //        .Where(t => userTaskCodes.Contains(t.TaskCode))
-                //        .ToList();
+                int overdueTasks = tasks.Count(t =>
+                    t.Due_Date.Date < today &&
+                    !string.Equals(
+                        t.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
 
-                //    // Skip users with no assigned tasks
-                //    if (!assignedTasks.Any())
-                //        continue;
-
-                //    var completedTasksList = assignedTasks
-                //        .Where(t => (t.Status ?? "").ToLower() == "completed")
-                //        .ToList();
-
-                //    int assignedCount = assignedTasks.Count;
-                //    int completedCount = completedTasksList.Count;
-
-                //    int onTimeCount = completedTasksList.Count(t =>
-                //        t.Completed_Date != null &&
-                //        t.Completed_Date.Date <= t.Due_Date.Date);
-
-                //    // Completion (30 points)
-                //    double completionScore =
-                //        assignedCount > 0
-                //            ? ((double)completedCount / assignedCount) * 30
-                //            : 0;
-
-                //    // On Time (35 points)
-                //    double onTimeScore =
-                //        completedCount > 0
-                //            ? ((double)onTimeCount / completedCount) * 35
-                //            : 0;
-
-                //    // Priority (35 points)
-                //    double earnedPriorityPoints = completedTasksList.Sum(t =>
-                //        GetPriorityWeight(t.Priority));
-
-                //    double totalPriorityPoints = assignedTasks.Sum(t =>
-                //        GetPriorityWeight(t.Priority));
-
-                //    double priorityScore =
-                //        totalPriorityPoints > 0
-                //            ? (earnedPriorityPoints / totalPriorityPoints) * 35
-                //            : 0;
-
-                //    double finalScore =
-                //        completionScore +
-                //        onTimeScore +
-                //        priorityScore;
-
-                //    performerStats.Add(new
-                //    {
-                //        user = u.Name,
-                //        assignedTasks = assignedCount,
-                //        completedTasks = completedCount,
-                //        onTimeTasks = onTimeCount,
-                //        completionScore = Math.Round(completionScore, 2),
-                //        onTimeScore = Math.Round(onTimeScore, 2),
-                //        priorityScore = Math.Round(priorityScore, 2),
-                //        score = Math.Round(finalScore, 2)
-                //    });
-                //}
-
-                // ================= TOP & LOW PERFORMERS =================
-
-                //var topPerformers = new List<object>();
-                //var lowPerformers = new List<object>();
-
-                //if (performerStats.Count >= 2)
-                //{
-                //    double maxScore = performerStats.Max(x => (double)x.score);
-                //    double minScore = performerStats.Min(x => (double)x.score);
-
-                //    // Everyone has same score → no low performer
-                //    if (maxScore == minScore)
-                //    {
-                //        topPerformers = performerStats.Cast<object>().ToList();
-                //        lowPerformers = new List<object>();
-                //    }
-                //    else
-                //    {
-                //        topPerformers = performerStats
-                //            .Where(x => (double)x.score == maxScore)
-                //            .Cast<object>()
-                //            .ToList();
-
-                //        lowPerformers = performerStats
-                //            .Where(x => (double)x.score == minScore)
-                //            .Cast<object>()
-                //            .ToList();
-                //    }
-                //}
-                // ================= OverDue Goal =================
+                // ============================================================
+                // 14. OVERDUE GOALS LIST
+                // ============================================================
 
                 var overdueGoalsList = goals
-    .Where(g =>
-        g.DueDate < today &&
-        (g.Status ?? "").ToLower() != "completed")
-    .Select(g => new
-    {
-        goalId = g.Id,
-        goal = g.Title,
-        status = g.Status ?? "",
-        createdAt = g.StartDate,
-        dueDate = g.DueDate,
-        priority = g.Priority ?? ""
-    })
-    .ToList();
-                // ================= OverDue Task =================
+                    .Where(g =>
+                        g.DueDate.Date < today &&
+                        !string.Equals(
+                            g.Status,
+                            "Completed",
+                            StringComparison.OrdinalIgnoreCase))
+                    .Select(g => new
+                    {
+                        goalId = g.Id,
+                        goalCode = g.GoalCode,
+                        goalType = g.GoalType,
+                        parentGoalId = g.ParentGoalId,
+                        goal = g.Title,
+                        status = g.Status ?? "",
+                        createdAt = g.StartDate,
+                        dueDate = g.DueDate,
+                        priority = g.Priority ?? "",
+                        progress = g.Progress
+                    })
+                    .ToList();
+
+                // ============================================================
+                // 15. OVERDUE TASK LIST
+                // ============================================================
 
                 var overdueTasksList = tasks
-    .Where(t =>
-        t.Due_Date < today &&
-        (t.Status ?? "").ToLower() != "completed")
-    .Select(t => new
-    {
-        taskCode = t.TaskCode,
-        task = t.Task,
-        description = t.Description ?? "",
-        priority = t.Priority ?? "",
-        status = t.Status ?? "",
-        createdAt = t.Created_At,
-        dueDate = t.Due_Date,
-        totalMembers = t.Members,
-        wasEdited = t.wasEdited
-    })
-    .ToList();
+                    .Where(t =>
+                        t.Due_Date.Date < today &&
+                        !string.Equals(
+                            t.Status,
+                            "Completed",
+                            StringComparison.OrdinalIgnoreCase))
+                    .Select(t => new
+                    {
+                        taskCode = t.TaskCode,
+                        goalCode = t.GoalCode,
+                        task = t.Task,
+                        description = t.Description ?? "",
+                        priority = t.Priority ?? "",
+                        status = t.Status ?? "",
+                        createdAt = t.Created_At,
+                        dueDate = t.Due_Date,
+                        totalMembers = t.Members,
+                        wasEdited = t.wasEdited
+                    })
+                    .ToList();
 
-                // ================= FINAL RESPONSE =================
+                // ============================================================
+                // 16. GOAL DETAILS
+                // ============================================================
+
+                var goalDetails = goals
+                    .OrderBy(g => g.GoalType == "Yearly" ? 0 : 1)
+                    .ThenBy(g => g.StartDate)
+                    .Select(g => new
+                    {
+                        id = g.Id,
+                        goalCode = g.GoalCode,
+                        goalType = g.GoalType,
+                        parentGoalId = g.ParentGoalId,
+                        title = g.Title,
+                        priority = g.Priority ?? "",
+                        startDate = g.StartDate,
+                        dueDate = g.DueDate,
+                        completedDate = g.Completed_Date,
+                        status = g.Status ?? "",
+                        progress = g.Progress,
+                        goalPoints = g.Goalpoints,
+
+                        tasks = tasks
+                            .Where(t => t.GoalCode == g.GoalCode)
+                            .Select(t => new
+                            {
+                                id = t.Id,
+                                taskCode = t.TaskCode,
+                                task = t.Task,
+                                description = t.Description ?? "",
+                                priority = t.Priority ?? "",
+                                status = t.Status ?? "",
+                                createdAt = t.Created_At,
+                                dueDate = t.Due_Date,
+                                completedDate = t.Completed_Date,
+                                members = t.Members,
+                                performanceType = t.PerformanceType,
+                                quantity = t.Quantity,
+                                startTime = t.StartTime,
+                                endTime = t.EndTime
+                            })
+                            .ToList()
+                    })
+                    .ToList();
+
+                // ============================================================
+                // 17. FINAL RESPONSE
+                // ============================================================
+
                 return Ok(new
                 {
-                    Department = departmentName,
+                    department = departmentName,
 
-                    TotalUsers = totalUsers,
+                    totalUsers = totalUsers,
 
-                    TotalGoals = totalGoals,
-                    CompletedGoals = completedGoals,
-                    PendingGoals = pendingGoals,
-                    OverdueGoals = overdueGoals,
-                    GoalCompletionPercentage = goalCompletionPercentage,
-                    OnTimeGoalCompletionPercentage = onTimePercentage,
+                    totalGoals = totalGoals,
+                    completedGoals = completedGoals,
+                    pendingGoals = pendingGoals,
+                    overdueGoals = overdueGoals,
 
-                    TotalTasks = totalTasks,
-                    CompletedTasks = completedTasks,
-                    PendingTasks = pendingTasks,
-                    OverdueTasks = overdueTasks,
+                    goalCompletionPercentage = goalCompletionPercentage,
+                    onTimeGoalCompletionPercentage = onTimePercentage,
+                    delayedGoalPercentage = delayedGoalPercentage,
 
-                    OverdueGoalsList = overdueGoalsList,
-                    OverdueTasksList = overdueTasksList,
+                    totalTasks = totalTasks,
+                    completedTasks = completedTasks,
+                    pendingTasks = pendingTasks,
+                    overdueTasks = overdueTasks,
 
-                    DelayedGoalPercentage = delayedGoalPercentage,
+                    overdueGoalsList = overdueGoalsList,
+                    overdueTasksList = overdueTasksList,
 
-                   // MonthlyTrend = monthlyTrend,
-
-                    //TopPerformer = topPerformers,
-                    //LowPerformer = lowPerformers
+                    goals = goalDetails
                 });
             }
             catch (Exception ex)
             {
                 return StatusCode(500, new
                 {
-                    message = "Error fetching department summary",
+                    message = "Error fetching department summary.",
                     error = ex.Message
                 });
             }
@@ -557,145 +647,972 @@ namespace staff.Controllers
             }
         }
 
+        //[HttpGet("Staff/{employeeId}/Year/{year}")]
+        //public async Task<IActionResult> GetEmployeeReportByYear(int employeeId,int year,DateTime? fromDate,DateTime? toDate)
+        //{
+        //    try
+        //    {
+        //        // ============================================================
+        //        // 1. YEAR RANGE
+        //        // ============================================================
+
+        //        var yearStart = new DateTime(year, 1, 1);
+        //        var nextYearStart = new DateTime(year + 1, 1, 1);
+
+        //        // ============================================================
+        //        // 2. CHECK EMPLOYEE
+        //        // ============================================================
+
+        //        var employee = await _context.Users
+        //            .FirstOrDefaultAsync(u => u.UserId == employeeId);
+
+        //        if (employee == null)
+        //        {
+        //            return NotFound(new
+        //            {
+        //                message = "Employee not found."
+        //            });
+        //        }
+
+        //        // ============================================================
+        //        // 3. DATE FILTER RANGE
+        //        // ============================================================
+
+        //        DateTime filterStart = fromDate.HasValue
+        //            ? fromDate.Value.Date
+        //            : yearStart;
+
+        //        DateTime filterEndExclusive = toDate.HasValue
+        //            ? toDate.Value.Date.AddDays(1)
+        //            : nextYearStart;
+
+        //        // Make sure supplied dates stay inside selected year
+        //        if (filterStart < yearStart)
+        //            filterStart = yearStart;
+
+        //        if (filterEndExclusive > nextYearStart)
+        //            filterEndExclusive = nextYearStart;
+
+        //        // ============================================================
+        //        // 4. TASKS ASSIGNED TO EMPLOYEE
+        //        // ============================================================
+
+        //        var employeePrefix = employeeId + "-";
+
+        //        var tasksQuery = _context.Tasks
+        //            .Join(
+        //                _context.TaskMembers,
+        //                t => t.TaskCode,
+        //                tm => tm.TaskCode,
+        //                (t, tm) => new
+        //                {
+        //                    Task = t,
+        //                    Member = tm
+        //                })
+        //            .Where(x =>
+        //                x.Member.Assign_To != null &&
+        //                x.Member.Assign_To.StartsWith(employeePrefix) &&
+
+        //                x.Task.Created_At >= yearStart &&
+        //                x.Task.Created_At < nextYearStart &&
+
+        //                x.Task.Created_At >= filterStart &&
+        //                x.Task.Created_At < filterEndExclusive)
+        //            .Select(x => x.Task)
+        //            .Distinct();
+
+        //        var tasks = await tasksQuery.ToListAsync();
+
+        //        // ============================================================
+        //        // 5. TASK CALCULATIONS
+        //        // ============================================================
+
+        //        int totalTasks = tasks.Count;
+
+        //        int completedTasks = tasks.Count(t =>
+        //            string.Equals(
+        //                t.Status,
+        //                "Completed",
+        //                StringComparison.OrdinalIgnoreCase));
+
+        //        int pendingTasks = tasks.Count(t =>
+        //            !string.Equals(
+        //                t.Status,
+        //                "Completed",
+        //                StringComparison.OrdinalIgnoreCase));
+
+        //        int overdueTasks = tasks.Count(t =>
+        //            !string.Equals(
+        //                t.Status,
+        //                "Completed",
+        //                StringComparison.OrdinalIgnoreCase) &&
+        //            t.Due_Date < DateTime.Now);
+
+        //        // ============================================================
+        //        // 6. GET EMPLOYEE GOAL ASSIGNMENTS
+        //        // ============================================================
+
+        //        var assignedGoalIds = await _context.GoalAssignment
+        //            .Where(a => a.UserId == employeeId)
+        //            .Select(a => a.GoalId)
+        //            .Distinct()
+        //            .ToListAsync();
+
+        //        // ============================================================
+        //        // 7. GET EMPLOYEE GOALS
+        //        // ============================================================
+
+        //        var goals = await _context.Goal
+        //            .Where(g =>
+        //                assignedGoalIds.Contains(g.Id) &&
+
+        //                g.StartDate >= yearStart &&
+        //                g.StartDate < nextYearStart &&
+
+        //                g.StartDate >= filterStart &&
+        //                g.StartDate < filterEndExclusive)
+        //            .ToListAsync();
+
+        //        // ============================================================
+        //        // 8. INCLUDE YEARLY PARENT GOALS
+        //        //
+        //        // If employee has a Monthly goal:
+        //        //
+        //        // Yearly
+        //        //   └── Monthly
+        //        //
+        //        // include the Yearly parent in the report.
+        //        // ============================================================
+
+        //        var parentGoalIds = goals
+        //            .Where(g => g.ParentGoalId.HasValue)
+        //            .Select(g => g.ParentGoalId!.Value)
+        //            .Distinct()
+        //            .ToList();
+
+        //        if (parentGoalIds.Any())
+        //        {
+        //            var parentGoals = await _context.Goal
+        //                .Where(g =>
+        //                    parentGoalIds.Contains(g.Id) &&
+        //                    g.GoalType == "Yearly")
+        //                .ToListAsync();
+
+        //            var existingGoalIds = goals
+        //                .Select(g => g.Id)
+        //                .ToHashSet();
+
+        //            foreach (var parentGoal in parentGoals)
+        //            {
+        //                if (!existingGoalIds.Contains(parentGoal.Id))
+        //                {
+        //                    goals.Add(parentGoal);
+        //                }
+        //            }
+        //        }
+
+        //        // ============================================================
+        //        // 9. GOAL CODES
+        //        // ============================================================
+
+        //        var goalCodes = goals
+        //            .Where(g => !string.IsNullOrWhiteSpace(g.GoalCode))
+        //            .Select(g => g.GoalCode)
+        //            .Distinct()
+        //            .ToList();
+
+        //        // ============================================================
+        //        // 10. GET TASKS UNDER EMPLOYEE GOALS
+        //        //
+        //        // This catches tasks using GoalCode even if task membership
+        //        // is already available above.
+        //        // ============================================================
+
+        //        var goalTasks = await _context.Tasks
+        //            .Where(t =>
+        //                t.GoalCode != null &&
+        //                goalCodes.Contains(t.GoalCode) &&
+
+        //                t.Created_At >= yearStart &&
+        //                t.Created_At < nextYearStart &&
+
+        //                t.Created_At >= filterStart &&
+        //                t.Created_At < filterEndExclusive)
+        //            .ToListAsync();
+
+        //        // ============================================================
+        //        // 11. COMBINE EMPLOYEE TASKS + GOAL TASKS
+        //        // ============================================================
+
+        //        var allTasks = tasks
+        //            .Concat(goalTasks)
+        //            .GroupBy(t => t.Id)
+        //            .Select(g => g.First())
+        //            .ToList();
+
+        //        // ============================================================
+        //        // 12. GOAL CALCULATIONS
+        //        // ============================================================
+
+        //        int totalGoals = goals.Count;
+
+        //        int completedGoals = goals.Count(g =>
+        //            string.Equals(
+        //                g.Status,
+        //                "Completed",
+        //                StringComparison.OrdinalIgnoreCase));
+
+        //        int pendingGoals = goals.Count(g =>
+        //            !string.Equals(
+        //                g.Status,
+        //                "Completed",
+        //                StringComparison.OrdinalIgnoreCase));
+
+        //        int overdueGoals = goals.Count(g =>
+        //            !string.Equals(
+        //                g.Status,
+        //                "Completed",
+        //                StringComparison.OrdinalIgnoreCase) &&
+        //            g.DueDate < DateTime.Now);
+
+        //        // ============================================================
+        //        // 13. GOAL COMPLETION %
+        //        // ============================================================
+
+        //        double goalCompletionPercent = totalGoals == 0
+        //            ? 0
+        //            : (double)completedGoals * 100 / totalGoals;
+
+        //        // ============================================================
+        //        // 14. ON-TIME GOALS
+        //        // ============================================================
+
+        //        var completedGoalsWithDate = goals
+        //            .Where(g =>
+        //                string.Equals(
+        //                    g.Status,
+        //                    "Completed",
+        //                    StringComparison.OrdinalIgnoreCase) &&
+        //                g.Completed_Date.HasValue)
+        //            .ToList();
+
+        //        int onTimeGoals = completedGoalsWithDate.Count(g =>
+        //            g.Completed_Date!.Value <= g.DueDate);
+
+        //        double goalOnTimePercent =
+        //            completedGoalsWithDate.Count == 0
+        //                ? 0
+        //                : (double)onTimeGoals *
+        //                  100 /
+        //                  completedGoalsWithDate.Count;
+
+        //        // ============================================================
+        //        // 15. DELAYED GOAL %
+        //        // ============================================================
+
+        //        int delayedGoalsCount = completedGoalsWithDate.Count(g =>
+        //            g.Completed_Date!.Value > g.DueDate);
+
+        //        double delayedGoalPercent =
+        //            completedGoalsWithDate.Count == 0
+        //                ? 0
+        //                : (double)delayedGoalsCount *
+        //                  100 /
+        //                  completedGoalsWithDate.Count;
+
+        //        // ============================================================
+        //        // 16. MONTHLY GOAL TREND
+        //        // ============================================================
+
+        //        var monthlyTrend = goals
+        //            .GroupBy(g => new
+        //            {
+        //                Year = g.StartDate.Year,
+        //                Month = g.StartDate.Month
+        //            })
+        //            .Select(g => new
+        //            {
+        //                year = g.Key.Year,
+        //                month = g.Key.Month,
+
+        //                total = g.Count(),
+
+        //                completed = g.Count(x =>
+        //                    string.Equals(
+        //                        x.Status,
+        //                        "Completed",
+        //                        StringComparison.OrdinalIgnoreCase)),
+
+        //                pending = g.Count(x =>
+        //                    !string.Equals(
+        //                        x.Status,
+        //                        "Completed",
+        //                        StringComparison.OrdinalIgnoreCase)),
+
+        //                overdue = g.Count(x =>
+        //                    !string.Equals(
+        //                        x.Status,
+        //                        "Completed",
+        //                        StringComparison.OrdinalIgnoreCase) &&
+        //                    x.DueDate < DateTime.Now)
+        //            })
+        //            .OrderBy(x => x.year)
+        //            .ThenBy(x => x.month)
+        //            .ToList();
+
+        //        // ============================================================
+        //        // 17. YEARLY PRODUCTIVITY
+        //        // ============================================================
+
+        //        var monthlyData = await _context.MonthlyProductivity
+        //            .Where(x =>
+        //                x.StaffId == employeeId &&
+        //                x.Year == year)
+        //            .ToListAsync();
+
+        //        int lastMonth;
+
+        //        if (year == DateTime.Now.Year)
+        //        {
+        //            lastMonth = DateTime.Now.Month - 1;
+        //        }
+        //        else
+        //        {
+        //            lastMonth = 12;
+        //        }
+
+        //        var completedMonthData = monthlyData
+        //            .Where(x =>
+        //                x.Month >= 1 &&
+        //                x.Month <= lastMonth)
+        //            .ToList();
+
+        //        double yearlyProductivity = 0;
+
+        //        if (completedMonthData.Any())
+        //        {
+        //            yearlyProductivity = Math.Round(
+        //                completedMonthData.Average(x =>
+        //                    (double)x.TotalScore),
+        //                2);
+        //        }
+
+        //        // ============================================================
+        //        // 18. OVERDUE TASK LIST
+        //        // ============================================================
+
+        //        var overdueTaskList = allTasks
+        //            .Where(t =>
+        //                !string.Equals(
+        //                    t.Status,
+        //                    "Completed",
+        //                    StringComparison.OrdinalIgnoreCase) &&
+        //                t.Due_Date < DateTime.Now)
+        //            .Select(t => new
+        //            {
+        //                taskCode = t.TaskCode,
+        //                goalCode = t.GoalCode,
+        //                task = t.Task,
+        //                description = t.Description ?? "",
+        //                priority = t.Priority ?? "",
+        //                status = t.Status ?? "",
+        //                createdAt = t.Created_At,
+        //                dueDate = t.Due_Date,
+        //                totalMembers = t.Members,
+        //                wasEdited = t.wasEdited
+        //            })
+        //            .ToList();
+
+        //        // ============================================================
+        //        // 19. OVERDUE GOAL LIST
+        //        // ============================================================
+
+        //        var overdueGoalList = goals
+        //            .Where(g =>
+        //                !string.Equals(
+        //                    g.Status,
+        //                    "Completed",
+        //                    StringComparison.OrdinalIgnoreCase) &&
+        //                g.DueDate < DateTime.Now)
+        //            .Select(g => new
+        //            {
+        //                goalId = g.Id,
+        //                goalCode = g.GoalCode,
+        //                goalType = g.GoalType,
+        //                parentGoalId = g.ParentGoalId,
+        //                goal = g.Title,
+        //                status = g.Status ?? "",
+        //                createdAt = g.StartDate,
+        //                dueDate = g.DueDate,
+        //                priority = g.Priority ?? "",
+        //                progress = g.Progress
+        //            })
+        //            .ToList();
+
+        //        // ============================================================
+        //        // 20. LEAVE MONTHLY DATA
+        //        // ============================================================
+
+        //        var leaveData = await _context.LeaveForm
+        //            .Where(l =>
+        //                l.SenderId == employeeId &&
+
+        //                l.FromDate >= yearStart &&
+        //                l.FromDate < nextYearStart &&
+
+        //                l.FromDate >= filterStart &&
+        //                l.FromDate < filterEndExclusive &&
+
+        //                string.Equals(
+        //                    l.Status,
+        //                    "Approved",
+        //                    StringComparison.OrdinalIgnoreCase) &&
+
+        //                !l.CompensationExtraWorkId.HasValue)
+        //            .GroupBy(l => new
+        //            {
+        //                Year = l.FromDate.Year,
+        //                Month = l.FromDate.Month
+        //            })
+        //            .Select(g => new
+        //            {
+        //                year = g.Key.Year,
+        //                month = g.Key.Month,
+        //                leaveDays = g.Sum(x => x.TotalDays ?? 0)
+        //            })
+        //            .ToListAsync();
+
+        //        // ============================================================
+        //        // 21. PERMISSION MONTHLY DATA
+        //        // ============================================================
+
+        //        var permissionData = await _context.PermissionForm
+        //            .Where(p =>
+        //                p.SenderId == employeeId &&
+
+        //                p.Date >= yearStart &&
+        //                p.Date < nextYearStart &&
+
+        //                p.Date >= filterStart &&
+        //                p.Date < filterEndExclusive &&
+
+        //                string.Equals(
+        //                    p.Status,
+        //                    "Approved",
+        //                    StringComparison.OrdinalIgnoreCase))
+        //            .GroupBy(p => new
+        //            {
+        //                Year = p.Date.Year,
+        //                Month = p.Date.Month
+        //            })
+        //            .Select(g => new
+        //            {
+        //                year = g.Key.Year,
+        //                month = g.Key.Month,
+        //                permissionHours = g.Sum(x => x.TotalHours)
+        //            })
+        //            .ToListAsync();
+
+        //        // ============================================================
+        //        // 22. COMBINE LEAVE + PERMISSION
+        //        // ============================================================
+
+        //        var leavePermissionMonthly = Enumerable
+        //            .Range(1, 12)
+        //            .Select(month => new
+        //            {
+        //                year = year,
+        //                month = month,
+
+        //                leave = leaveData
+        //                    .Where(x => x.month == month)
+        //                    .Select(x => x.leaveDays)
+        //                    .FirstOrDefault(),
+
+        //                permission = permissionData
+        //                    .Where(x => x.month == month)
+        //                    .Select(x => x.permissionHours)
+        //                    .FirstOrDefault()
+        //            })
+        //            .ToList();
+
+        //        // ============================================================
+        //        // 23. GOAL DETAILS
+        //        // ============================================================
+
+        //        var goalDetails = goals
+        //            .OrderBy(g =>
+        //                string.Equals(
+        //                    g.GoalType,
+        //                    "Yearly",
+        //                    StringComparison.OrdinalIgnoreCase)
+        //                    ? 0
+        //                    : 1)
+        //            .ThenBy(g => g.StartDate)
+        //            .Select(g => new
+        //            {
+        //                id = g.Id,
+        //                goalCode = g.GoalCode,
+        //                goalType = g.GoalType,
+        //                parentGoalId = g.ParentGoalId,
+        //                title = g.Title,
+        //                priority = g.Priority ?? "",
+        //                startDate = g.StartDate,
+        //                dueDate = g.DueDate,
+        //                completedDate = g.Completed_Date,
+        //                status = g.Status ?? "",
+        //                progress = g.Progress,
+        //                goalPoints = g.Goalpoints,
+
+        //                tasks = allTasks
+        //                    .Where(t => t.GoalCode == g.GoalCode)
+        //                    .Select(t => new
+        //                    {
+        //                        id = t.Id,
+        //                        taskCode = t.TaskCode,
+        //                        task = t.Task,
+        //                        description = t.Description ?? "",
+        //                        priority = t.Priority ?? "",
+        //                        status = t.Status ?? "",
+        //                        createdAt = t.Created_At,
+        //                        dueDate = t.Due_Date,
+        //                        completedDate = t.Completed_Date,
+        //                        members = t.Members,
+        //                        performanceType = t.PerformanceType,
+        //                        quantity = t.Quantity,
+        //                        startTime = t.StartTime,
+        //                        endTime = t.EndTime
+        //                    })
+        //                    .ToList()
+        //            })
+        //            .ToList();
+
+        //        // ============================================================
+        //        // 24. FINAL RESPONSE
+        //        // ============================================================
+
+        //        return Ok(new
+        //        {
+        //            employeeId,
+        //            employeeName = employee.Name,
+        //            year,
+
+        //            fromDate = filterStart,
+        //            toDate = filterEndExclusive.AddTicks(-1),
+
+        //            // ---------------- TASKS ----------------
+
+        //            totalTasks,
+        //            completedTasks,
+        //            pendingTasks,
+        //            overdueTasks,
+
+        //            // ---------------- GOALS ----------------
+
+        //            totalGoals,
+        //            completedGoals,
+        //            pendingGoals,
+        //            overdueGoals,
+
+        //            goalCompletionPercent =
+        //                Math.Round(goalCompletionPercent, 2),
+
+        //            goalOnTimePercent =
+        //                Math.Round(goalOnTimePercent, 2),
+
+        //            delayedGoalPercent =
+        //                Math.Round(delayedGoalPercent, 2),
+
+        //            // ---------------- PRODUCTIVITY ----------------
+
+        //            yearlyProductivity,
+
+        //            // ---------------- TREND ----------------
+
+        //            monthlyTrend,
+
+        //            // ---------------- OVERDUE ----------------
+
+        //            overdueTaskList,
+        //            overdueGoalList,
+
+        //            // ---------------- LEAVE / PERMISSION ----------------
+
+        //            leavePermissionMonthly,
+
+        //            // ---------------- GOALS + TASKS ----------------
+
+        //            goals = goalDetails
+        //        });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(500, new
+        //        {
+        //            message = "Error fetching employee report.",
+        //            error = ex.Message,
+        //            innerError = ex.InnerException?.Message
+        //        });
+        //    }
+        //}
+
+
+        [Authorize]
         [HttpGet("Staff/{employeeId}/Year/{year}")]
-        public async Task<IActionResult> GetEmployeeReportByYear(int employeeId,int year,DateTime? fromDate,DateTime? toDate)
+        public async Task<IActionResult> GetEmployeeReportByYear(
+    int employeeId,
+    int year,
+    DateTime? fromDate,
+    DateTime? toDate)
         {
             try
             {
-                // ---------------- YEAR RANGE ----------------
+                // ============================================================
+                // 1. YEAR RANGE
+                // ============================================================
+
                 var yearStart = new DateTime(year, 1, 1);
-                var yearEnd = new DateTime(year, 12, 31, 23, 59, 59);
+                var nextYearStart = new DateTime(year + 1, 1, 1);
 
-                // ---------------- TASKS ----------------
-                var tasksQuery = _context.Tasks
-                    .Join(_context.TaskMembers,
-                          t => t.TaskCode,
-                          tm => tm.TaskCode,
-                          (t, tm) => new { Task = t, Member = tm })
+                // ============================================================
+                // 2. CHECK EMPLOYEE
+                // ============================================================
+
+                var employee = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == employeeId);
+
+                if (employee == null)
+                {
+                    return NotFound(new
+                    {
+                        message = "Employee not found."
+                    });
+                }
+
+                // ============================================================
+                // 3. DATE FILTER
+                // ============================================================
+
+                DateTime filterStart = fromDate?.Date ?? yearStart;
+
+                DateTime filterEndExclusive = toDate.HasValue
+                    ? toDate.Value.Date.AddDays(1)
+                    : nextYearStart;
+
+                // Keep dates inside selected year
+                if (filterStart < yearStart)
+                    filterStart = yearStart;
+
+                if (filterStart >= nextYearStart)
+                    filterStart = yearStart;
+
+                if (filterEndExclusive > nextYearStart)
+                    filterEndExclusive = nextYearStart;
+
+                if (filterEndExclusive <= filterStart)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Invalid date range."
+                    });
+                }
+
+                // ============================================================
+                // 4. EMPLOYEE TASK PREFIX
+                //
+                // Assign_To example:
+                // 12-John
+                // 15-Keerthana
+                // ============================================================
+
+                var employeePrefix = employeeId + "-";
+
+                // ============================================================
+                // 5. GET TASKS DIRECTLY ASSIGNED TO EMPLOYEE
+                // ============================================================
+
+                var employeeTasks = await _context.Tasks
+                    .Join(
+                        _context.TaskMembers,
+                        t => t.TaskCode,
+                        tm => tm.TaskCode,
+                        (t, tm) => new
+                        {
+                            Task = t,
+                            Member = tm
+                        })
                     .Where(x =>
-                        x.Member.Assign_To.StartsWith(employeeId + "-") &&
+                        x.Member.Assign_To != null &&
+                        x.Member.Assign_To.StartsWith(employeePrefix) &&
+
                         x.Task.Created_At >= yearStart &&
-                        x.Task.Created_At <= yearEnd)
+                        x.Task.Created_At < nextYearStart &&
+
+                        x.Task.Created_At >= filterStart &&
+                        x.Task.Created_At < filterEndExclusive)
                     .Select(x => x.Task)
-                    .AsQueryable();
+                    .Distinct()
+                    .ToListAsync();
 
-                // Optional date filter
-                if (fromDate.HasValue && toDate.HasValue)
-                {
-                    var start = fromDate.Value.Date;
-                    var end = toDate.Value.Date.AddDays(1).AddTicks(-1);
+                // ============================================================
+                // 6. GET EMPLOYEE GOAL ASSIGNMENTS
+                // ============================================================
 
-                    tasksQuery = tasksQuery.Where(t =>
-                        t.Created_At >= start && t.Created_At <= end);
-                }
+                var assignedGoalIds = await _context.GoalAssignment
+                    .Where(a => a.UserId == employeeId)
+                    .Select(a => a.GoalId)
+                    .Distinct()
+                    .ToListAsync();
 
-                var tasks = await tasksQuery.ToListAsync();
+                // ============================================================
+                // 7. GET EMPLOYEE GOALS
+                //
+                // Monthly goals are filtered by selected date range.
+                // ============================================================
 
-                int totalTasks = tasks.Count;
-                int completedTasks = tasks.Count(t => t.Status.ToLower() == "completed");
-                int pendingTasks = tasks.Count(t => t.Status.ToLower() != "completed");
-                int overdueTasks = tasks.Count(t =>
-                    t.Status.ToLower() != "completed" && t.Due_Date < DateTime.Now);
-
-                // ---------------- GOALS ----------------
-                var goalsQuery = _context.Goal
+                var goals = await _context.Goal
                     .Where(g =>
-                        g.Assign_To == employeeId.ToString() &&
+                        assignedGoalIds.Contains(g.Id) &&
+
                         g.StartDate >= yearStart &&
-                        g.StartDate <= yearEnd);
+                        g.StartDate < nextYearStart &&
 
-                if (fromDate.HasValue && toDate.HasValue)
+                        g.StartDate < filterEndExclusive &&
+                        g.DueDate >= filterStart)
+                    .ToListAsync();
+
+                // ============================================================
+                // 8. INCLUDE YEARLY PARENT GOALS
+                //
+                // Example:
+                //
+                // YG001
+                //   |
+                //   +-- MG001
+                //   +-- MG002
+                //
+                // If employee has MG001, include YG001.
+                // ============================================================
+
+                var parentGoalIds = goals
+                    .Where(g => g.ParentGoalId.HasValue)
+                    .Select(g => g.ParentGoalId!.Value)
+                    .Distinct()
+                    .ToList();
+
+                if (parentGoalIds.Any())
                 {
-                    var start = fromDate.Value.Date;
-                    var end = toDate.Value.Date.AddDays(1).AddTicks(-1);
+                    var parentGoals = await _context.Goal
+                        .Where(g =>
+                            parentGoalIds.Contains(g.Id) &&
+                            g.GoalType == "Yearly")
+                        .ToListAsync();
 
-                    goalsQuery = goalsQuery.Where(g =>
-                        g.StartDate >= start && g.StartDate <= end);
+                    var existingGoalIds = goals
+                        .Select(g => g.Id)
+                        .ToHashSet();
+
+                    foreach (var parentGoal in parentGoals)
+                    {
+                        if (!existingGoalIds.Contains(parentGoal.Id))
+                        {
+                            goals.Add(parentGoal);
+                        }
+                    }
                 }
 
-                var goals = await goalsQuery.ToListAsync();
+                // ============================================================
+                // 9. GOAL CODES
+                // ============================================================
+
+                var goalCodes = goals
+                    .Where(g => !string.IsNullOrWhiteSpace(g.GoalCode))
+                    .Select(g => g.GoalCode!)
+                    .Distinct()
+                    .ToList();
+                // ============================================================
+                // 10. GET TASKS UNDER EMPLOYEE GOALS
+                // ============================================================
+
+                var goalTasks = new List<TaskTable>();
+
+                if (goalCodes.Any())
+                {
+                    goalTasks = await _context.Tasks
+                        .Join(
+                            _context.TaskMembers,
+                            t => t.TaskCode,
+                            tm => tm.TaskCode,
+                            (t, tm) => new
+                            {
+                                Task = t,
+                                Member = tm
+                            })
+                        .Where(x =>
+                            x.Member.Assign_To != null &&
+                            x.Member.Assign_To.StartsWith(employeePrefix) &&
+
+                            x.Task.GoalCode != null &&
+                            goalCodes.Contains(x.Task.GoalCode) &&
+
+                            x.Task.Created_At >= yearStart &&
+                            x.Task.Created_At < nextYearStart &&
+
+                            x.Task.Created_At >= filterStart &&
+                            x.Task.Created_At < filterEndExclusive)
+                        .Select(x => x.Task)
+                        .Distinct()
+                        .ToListAsync();
+                }
+
+                // ============================================================
+                // 11. COMBINE TASKS
+                // ============================================================
+
+                var allTasks = employeeTasks
+                    .Concat(goalTasks)
+                    .GroupBy(t => t.Id)
+                    .Select(g => g.First())
+                    .ToList();
+
+                // ============================================================
+                // 12. TASK COUNTS
+                // ============================================================
+
+                int totalTasks = allTasks.Count;
+
+                int completedTasks = allTasks.Count(t =>
+                    string.Equals(
+                        t.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
+
+                int pendingTasks = allTasks.Count(t =>
+                    !string.Equals(
+                        t.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
+
+                int overdueTasks = allTasks.Count(t =>
+                    !string.Equals(
+                        t.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    t.Due_Date < DateTime.Now);
+
+                // ============================================================
+                // 13. GOAL COUNTS
+                // ============================================================
 
                 int totalGoals = goals.Count;
-                int completedGoals = goals.Count(g => g.Status.ToLower() == "completed");
-                int pendingGoals = goals.Count(g => g.Status.ToLower() != "completed");
-                int overdueGoals = goals.Count(g =>
-                    g.Status.ToLower() != "completed" && g.DueDate < DateTime.Now);
 
-                // ---------------- GOAL METRICS ----------------
-                var completedGoalsWithDate = goals
-                    .Where(g =>
-                        g.Status.ToLower() == "completed" &&
-                        g.Completed_Date != null &&
-                        g.DueDate != null)
-                    .ToList();
+                int completedGoals = goals.Count(g =>
+                    string.Equals(
+                        g.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
+
+                int pendingGoals = goals.Count(g =>
+                    !string.Equals(
+                        g.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase));
+
+                int overdueGoals = goals.Count(g =>
+                    !string.Equals(
+                        g.Status,
+                        "Completed",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    g.DueDate < DateTime.Now);
+
+                // ============================================================
+                // 14. GOAL COMPLETION %
+                // ============================================================
 
                 double goalCompletionPercent = totalGoals == 0
                     ? 0
                     : (double)completedGoals * 100 / totalGoals;
 
-                double goalOnTimePercent = completedGoalsWithDate.Count == 0
-                    ? 0
-                    : (double)completedGoalsWithDate.Count(g =>
-                        g.Completed_Date <= g.DueDate) * 100 / completedGoalsWithDate.Count;
+                // ============================================================
+                // 15. ON-TIME GOALS
+                // ============================================================
 
-                // ---------------- DELAYED GOAL PERCENTAGE ----------------
-
-                var completedGoalsWithValidDates = goals
+                var completedGoalsWithDate = goals
                     .Where(g =>
-                        (g.Status ?? "").ToLower() == "completed" &&
-                        g.Completed_Date != null &&
-                        g.DueDate != null)
+                        string.Equals(
+                            g.Status,
+                            "Completed",
+                            StringComparison.OrdinalIgnoreCase) &&
+                        g.Completed_Date.HasValue)
                     .ToList();
 
-                // Count delayed goals
-                int delayedGoalsCount = completedGoalsWithValidDates.Count(g =>
-                    g.Completed_Date > g.DueDate);
+                int onTimeGoals = completedGoalsWithDate.Count(g =>
+                    g.Completed_Date!.Value <= g.DueDate);
 
-                // Calculate percentage
-                double delayedGoalPercent = completedGoalsWithValidDates.Count == 0
-                    ? 0
-                    : (double)delayedGoalsCount * 100 / completedGoalsWithValidDates.Count;
+                double goalOnTimePercent =
+                    completedGoalsWithDate.Count == 0
+                        ? 0
+                        : (double)onTimeGoals *
+                          100 /
+                          completedGoalsWithDate.Count;
 
-                // ---------------- MONTHLY TREND ----------------
-                var trendData = await _context.Goal
-                    .Where(g => g.Assign_To.StartsWith(employeeId + "-") || g.Assign_To == employeeId.ToString())
-    .Where(g => g.StartDate != null &&
-            g.StartDate >= yearStart &&
-            g.StartDate <= yearEnd)
-    .GroupBy(g => new { g.StartDate.Year, g.StartDate.Month })
-    .Select(g => new
-    {
-        Year = g.Key.Year,
-        Month = g.Key.Month,
-        Total = g.Count(),
-        Completed = g.Count(x => x.Status.ToLower() == "completed"),
-        Pending = g.Count(x => x.Status.ToLower() != "completed"),
-        Overdue = g.Count(x =>
-            x.Status.ToLower() != "completed" &&
-            x.DueDate != null &&
-            x.DueDate.Year == g.Key.Year &&
-            x.DueDate.Month == g.Key.Month)
-    })
-    .OrderBy(x => x.Year)
-    .ThenBy(x => x.Month)
-    .ToListAsync();
+                // ============================================================
+                // 16. DELAYED GOALS
+                // ============================================================
 
-                // Fill missing months
-                var monthlyTrend = trendData
-        .OrderBy(x => x.Year)
-        .ThenBy(x => x.Month)
-        .Select(x => new
-        {
-            x.Year,
-            x.Month,
-            x.Total,
-            x.Completed,
-            x.Pending,
-            x.Overdue
-        })
-        .ToList();
-                //-------------------------Yearly productivity-------------------------
+                int delayedGoalsCount = completedGoalsWithDate.Count(g =>
+                    g.Completed_Date!.Value > g.DueDate);
 
+                double delayedGoalPercent =
+                    completedGoalsWithDate.Count == 0
+                        ? 0
+                        : (double)delayedGoalsCount *
+                          100 /
+                          completedGoalsWithDate.Count;
+
+                // ============================================================
+                // 17. MONTHLY GOAL TREND
+                // ============================================================
+
+                var monthlyTrend = goals
+                    .GroupBy(g => new
+                    {
+                        Year = g.StartDate.Year,
+                        Month = g.StartDate.Month
+                    })
+                    .Select(g => new
+                    {
+                        year = g.Key.Year,
+                        month = g.Key.Month,
+
+                        total = g.Count(),
+
+                        completed = g.Count(x =>
+                            string.Equals(
+                                x.Status,
+                                "Completed",
+                                StringComparison.OrdinalIgnoreCase)),
+
+                        pending = g.Count(x =>
+                            !string.Equals(
+                                x.Status,
+                                "Completed",
+                                StringComparison.OrdinalIgnoreCase)),
+
+                        overdue = g.Count(x =>
+                            !string.Equals(
+                                x.Status,
+                                "Completed",
+                                StringComparison.OrdinalIgnoreCase) &&
+                            x.DueDate < DateTime.Now)
+                    })
+                    .OrderBy(x => x.year)
+                    .ThenBy(x => x.month)
+                    .ToList();
+
+                // ============================================================
+                // 18. PRODUCTIVITY
+                // ============================================================
 
                 var monthlyData = await _context.MonthlyProductivity
                     .Where(x =>
@@ -705,178 +1622,414 @@ namespace staff.Controllers
 
                 int lastMonth;
 
-                // Selected year is current year
                 if (year == DateTime.Now.Year)
                 {
-                    // Do not include current month
                     lastMonth = DateTime.Now.Month - 1;
                 }
                 else
                 {
-                    // Previous/future selected year → all 12 months
                     lastMonth = 12;
                 }
 
-                // Only completed months
                 var completedMonthData = monthlyData
-                    .Where(x => x.Month >= 1 && x.Month <= lastMonth)
+                    .Where(x =>
+                        x.Month >= 1 &&
+                        x.Month <= lastMonth)
                     .ToList();
-
-
-                //// No productivity data
-                //if (!completedMonthData.Any())
-                //{
-                //    return Ok(new
-                //    {
-                //        employeeId,
-                //        year,
-                //        yearlyProductivity = 0
-                //    });
-                //}
 
                 double yearlyProductivity = 0;
 
                 if (completedMonthData.Any())
                 {
-                    yearlyProductivity = completedMonthData
-                        .Average(x => (double)x.TotalScore);
-
-                    yearlyProductivity = Math.Round(yearlyProductivity, 2);
+                    yearlyProductivity = Math.Round(
+                        completedMonthData.Average(x =>
+                            (double)x.TotalScore),
+                        2);
                 }
 
-                //// Average of actual monthly scores
-                //double yearlyProductivity =
-                //    completedMonthData.Average(x => (double)x.TotalScore);
+                // ============================================================
+                // 19. OVERDUE TASK LIST
+                // ============================================================
 
+                var overdueTaskList = allTasks
+                    .Where(t =>
+                        !string.Equals(
+                            t.Status,
+                            "Completed",
+                            StringComparison.OrdinalIgnoreCase) &&
+                        t.Due_Date < DateTime.Now)
+                    .Select(t => new
+                    {
+                        id = t.Id,
+                        taskCode = t.TaskCode,
+                        goalCode = t.GoalCode,
 
-                //// Optional: round to 2 decimal places
-                //yearlyProductivity =
-                //    Math.Round(yearlyProductivity, 2);
+                        task = t.Task,
+                        description = t.Description ?? "",
 
-                //-----------------------Overdue Goal and Task------------------
+                        priority = t.Priority ?? "",
+                        status = t.Status ?? "",
 
+                        createdAt = t.Created_At,
+                        dueDate = t.Due_Date,
 
-                var overdueTaskList = tasks
-    .Where(t =>
-        t.Status.ToLower() != "completed" &&
-        t.Due_Date < DateTime.Now)
-    .Select(t => new
-    {
-        taskCode = t.TaskCode,
-        task = t.Task,
-        description = t.Description ?? "",
-        priority = t.Priority ?? "",
-        status = t.Status ?? "",
-        createdAt = t.Created_At,
-        dueDate = t.Due_Date,
-        totalMembers = t.Members,
-        wasEdited = t.wasEdited
-    })
-    .ToList();
+                        completedDate = t.Completed_Date,
+
+                        totalMembers = t.Members,
+                        wasEdited = t.wasEdited,
+
+                        // TASK QUANTITY
+                        targetQuantity = t.Quantity,
+                        completedQuantity = t.CompletedQuantity ?? 0,
+
+                        pendingQuantity = t.Quantity.HasValue
+                            ? Math.Max(
+                                0,
+                                t.Quantity.Value -
+                                (t.CompletedQuantity ?? 0))
+                            : (int?)null
+                    })
+                    .ToList();
+
+                // ============================================================
+                // 20. OVERDUE GOAL LIST
+                // ============================================================
+
                 var overdueGoalList = goals
-    .Where(g =>
-        g.Status.ToLower() != "completed" &&
-        g.DueDate < DateTime.Now)
-    .Select(g => new
-    {
-        goalId = g.Id,
-        goal = g.Title,
-        status = g.Status ?? "",
-        createdAt = g.StartDate,
-        dueDate = g.DueDate,
-        priority = g.Priority ?? ""
-    })
-    .ToList();
-                // ---------------- LEAVE & PERMISSION MONTHLY ----------------
+                    .Where(g =>
+                        !string.Equals(
+                            g.Status,
+                            "Completed",
+                            StringComparison.OrdinalIgnoreCase) &&
+                        g.DueDate < DateTime.Now)
+                    .Select(g => new
+                    {
+                        goalId = g.Id,
+                        goalCode = g.GoalCode,
+                        goalType = g.GoalType,
+                        parentGoalId = g.ParentGoalId,
 
-                // LEAVE (group by month)
+                        goal = g.Title,
+
+                        status = g.Status ?? "",
+
+                        createdAt = g.StartDate,
+                        dueDate = g.DueDate,
+
+                        priority = g.Priority ?? "",
+                        progress = g.Progress,
+
+                        // GOAL QUANTITY
+                        targetQuantity = g.TargetQuantity,
+                        completedQuantity = g.CompletedQuantity ?? 0,
+
+                        pendingQuantity = g.TargetQuantity.HasValue
+                            ? Math.Max(
+                                0,
+                                g.TargetQuantity.Value -
+                                (g.CompletedQuantity ?? 0))
+                            : (int?)null
+                    })
+                    .ToList();
+
+                // ============================================================
+                // 21. LEAVE MONTHLY DATA
+                // ============================================================
+
                 var leaveData = await _context.LeaveForm
                     .Where(l =>
                         l.SenderId == employeeId &&
+
                         l.FromDate >= yearStart &&
-                        l.FromDate <= yearEnd &&
-                        (l.Status ?? "").ToLower() == "approved" && !l.CompensationExtraWorkId.HasValue)
-                    .GroupBy(l => new { l.FromDate.Year, l.FromDate.Month })
+                        l.FromDate < nextYearStart &&
+
+                        l.FromDate >= filterStart &&
+                        l.FromDate < filterEndExclusive &&
+
+                        l.Status != null &&
+                        l.Status.Trim().ToLower() == "approved" &&
+
+                        !l.CompensationExtraWorkId.HasValue)
+                    .GroupBy(l => new
+                    {
+                        Year = l.FromDate.Year,
+                        Month = l.FromDate.Month
+                    })
                     .Select(g => new
                     {
-                        Year = g.Key.Year,
-                        Month = g.Key.Month,
-                        LeaveDays = g.Sum(x => x.TotalDays ?? 0)
+                        year = g.Key.Year,
+                        month = g.Key.Month,
+                        leaveDays = g.Sum(x => x.TotalDays ?? 0)
                     })
                     .ToListAsync();
 
+                // ============================================================
+                // 22. PERMISSION MONTHLY DATA
+                // ============================================================
 
-                // PERMISSION (group by month)
                 var permissionData = await _context.PermissionForm
                     .Where(p =>
                         p.SenderId == employeeId &&
+
                         p.Date >= yearStart &&
-                        p.Date <= yearEnd &&
-                        (p.Status ?? "").ToLower() == "approved")
-                    .GroupBy(p => new { p.Date.Year, p.Date.Month })
+                        p.Date < nextYearStart &&
+
+                        p.Date >= filterStart &&
+                        p.Date < filterEndExclusive &&
+
+                        p.Status != null &&
+                        p.Status.Trim().ToLower() == "approved")
+                    .GroupBy(p => new
+                    {
+                        Year = p.Date.Year,
+                        Month = p.Date.Month
+                    })
                     .Select(g => new
                     {
-                        Year = g.Key.Year,
-                        Month = g.Key.Month,
-                        PermissionHours = g.Sum(x => x.TotalHours)
+                        year = g.Key.Year,
+                        month = g.Key.Month,
+                        permissionHours = g.Sum(x => x.TotalHours)
                     })
                     .ToListAsync();
-                // Combine both into single monthly structure
-                var leavePermissionMonthly = Enumerable.Range(1, 12)
+
+                // ============================================================
+                // 23. LEAVE + PERMISSION MONTHLY
+                // ============================================================
+
+                var leavePermissionMonthly = Enumerable
+                    .Range(1, 12)
                     .Select(month => new
                     {
-                        Year = year,
-                        Month = month,
+                        year = year,
+                        month = month,
 
-                        Leave = leaveData
-                            .Where(l => l.Month == month)
-                            .Select(l => l.LeaveDays)
+                        leave = leaveData
+                            .Where(x => x.month == month)
+                            .Select(x => x.leaveDays)
                             .FirstOrDefault(),
 
-                        Permission = permissionData
-                            .Where(p => p.Month == month)
-                            .Select(p => p.PermissionHours)
+                        permission = permissionData
+                            .Where(x => x.month == month)
+                            .Select(x => x.permissionHours)
                             .FirstOrDefault()
                     })
                     .ToList();
-                // ---------------- RESULT ----------------
+
+                // ============================================================
+                // 24. GOAL DETAILS + TASK DETAILS
+                // ============================================================
+
+                var goalDetails = goals
+                    .OrderBy(g =>
+                        string.Equals(
+                            g.GoalType,
+                            "Yearly",
+                            StringComparison.OrdinalIgnoreCase)
+                            ? 0
+                            : 1)
+                    .ThenBy(g => g.StartDate)
+                    .Select(g => new
+                    {
+                        id = g.Id,
+
+                        goalCode = g.GoalCode,
+
+                        goalType = g.GoalType,
+
+                        parentGoalId = g.ParentGoalId,
+
+                        title = g.Title,
+
+                        priority = g.Priority ?? "",
+
+                        startDate = g.StartDate,
+
+                        dueDate = g.DueDate,
+
+                        completedDate = g.Completed_Date,
+
+                        status = g.Status ?? "",
+
+                        progress = g.Progress,
+
+                        goalPoints = g.Goalpoints,
+
+                        // ====================================================
+                        // GOAL QUANTITY
+                        // ====================================================
+
+                        targetQuantity = g.TargetQuantity,
+
+                        completedQuantity = g.CompletedQuantity ?? 0,
+
+                        pendingQuantity = g.TargetQuantity.HasValue
+                            ? Math.Max(
+                                0,
+                                g.TargetQuantity.Value -
+                                (g.CompletedQuantity ?? 0))
+                            : (int?)null,
+
+                        // ====================================================
+                        // TASKS
+                        // ====================================================
+
+                        tasks = allTasks
+                            .Where(t =>
+                                !string.IsNullOrWhiteSpace(t.GoalCode) &&
+                                t.GoalCode == g.GoalCode)
+                            .OrderBy(t => t.Created_At)
+                            .Select(t => new
+                            {
+                                id = t.Id,
+
+                                taskCode = t.TaskCode,
+
+                                task = t.Task,
+
+                                description = t.Description ?? "",
+
+                                priority = t.Priority ?? "",
+
+                                status = t.Status ?? "",
+
+                                createdAt = t.Created_At,
+
+                                dueDate = t.Due_Date,
+
+                                completedDate = t.Completed_Date,
+
+                                members = t.Members,
+
+                                performanceType = t.PerformanceType,
+
+                                // =================================================
+                                // TASK QUANTITY
+                                // =================================================
+
+                                targetQuantity = t.Quantity,
+
+                                completedQuantity = t.CompletedQuantity ?? 0,
+
+                                pendingQuantity = t.Quantity.HasValue
+                                    ? Math.Max(
+                                        0,
+                                        t.Quantity.Value -
+                                        (t.CompletedQuantity ?? 0))
+                                    : (int?)null,
+
+                                startTime = t.StartTime,
+
+                                endTime = t.EndTime
+                            })
+                            .ToList()
+                    })
+                    .ToList();
+
+                // ============================================================
+                // 25. FINAL RESPONSE
+                // ============================================================
+
                 return Ok(new
                 {
                     employeeId,
+
+                    employeeName = employee.Name,
+
+                    department = employee.Department,
+
+                    role = employee.Role,
+
                     year,
 
+                    fromDate = filterStart,
+
+                    toDate = filterEndExclusive.AddTicks(-1),
+
+                    // ========================================================
+                    // TASK SUMMARY
+                    // ========================================================
+
                     totalTasks,
+
                     completedTasks,
+
                     pendingTasks,
+
                     overdueTasks,
 
+                    // ========================================================
+                    // GOAL SUMMARY
+                    // ========================================================
+
                     totalGoals,
+
                     completedGoals,
+
                     pendingGoals,
+
                     overdueGoals,
 
-                    goalCompletionPercent = Math.Round(goalCompletionPercent, 2),
-                    goalOnTimePercent = Math.Round(goalOnTimePercent, 2),
+                    goalCompletionPercent =
+                        Math.Round(
+                            goalCompletionPercent,
+                            2),
 
-                    delayedGoalPercent = Math.Round(delayedGoalPercent, 2),
+                    goalOnTimePercent =
+                        Math.Round(
+                            goalOnTimePercent,
+                            2),
 
-                    monthlyTrend, 
-                 //   yearlyProductivity,
+                    delayedGoalPercent =
+                        Math.Round(
+                            delayedGoalPercent,
+                            2),
 
-                    overdueTaskList,  
+                    // ========================================================
+                    // PRODUCTIVITY
+                    // ========================================================
+
+                    yearlyProductivity,
+
+                    // ========================================================
+                    // TREND
+                    // ========================================================
+
+                    monthlyTrend,
+
+                    // ========================================================
+                    // OVERDUE
+                    // ========================================================
+
+                    overdueTaskList,
+
                     overdueGoalList,
 
-                    leavePermissionMonthly
+                    // ========================================================
+                    // LEAVE / PERMISSION
+                    // ========================================================
 
+                    leavePermissionMonthly,
+
+                    // ========================================================
+                    // COMPLETE GOAL + TASK REPORT
+                    // ========================================================
+
+                    goals = goalDetails
                 });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new
-                {
-                    message = "Error fetching employee report",
-                    error = ex.Message
-                });
+                return StatusCode(
+                    500,
+                    new
+                    {
+                        message = "Error fetching employee report.",
+
+                        error = ex.Message,
+
+                        innerError =
+                            ex.InnerException?.Message
+                    });
             }
         }
 
@@ -935,75 +2088,448 @@ namespace staff.Controllers
         }
 
 
+        [Authorize]
         [HttpGet("FilteredFullReport")]
-        public async Task<IActionResult> GetFilteredFullReport(int? userId, string? department)
+        public async Task<IActionResult> GetFilteredFullReport(
+    int? userId,
+    string? department)
         {
             try
             {
                 var today = DateTime.Today;
 
-                // Filter users first
-                var users = _context.Users.AsQueryable();
+                // ============================================================
+                // 1. FILTER USERS
+                // ============================================================
 
+                var usersQuery = _context.Users.AsQueryable();
+
+                // Filter by specific user
                 if (userId.HasValue)
-                    users = users.Where(u => u.UserId == userId.Value);
+                {
+                    usersQuery = usersQuery
+                        .Where(u => u.UserId == userId.Value);
+                }
 
-                if (!string.IsNullOrEmpty(department))
-                    users = users.Where(u => u.Department == department);
+                // Filter by department
+                if (!string.IsNullOrWhiteSpace(department))
+                {
+                    var departmentName = department.Trim();
 
-                var userList = await users.ToListAsync(); 
+                    usersQuery = usersQuery
+                        .Where(u =>
+                            u.Department != null &&
+                            u.Department.Trim().ToLower() ==
+                            departmentName.ToLower());
+                }
 
-                // ================= TASKS =================
-                var allTaskMembers = await _context.TaskMembers.ToListAsync();
-                var allTasks = await _context.Tasks.ToListAsync();
-                var allTaskReviews = await _context.TaskReview.ToListAsync();
+                var userList = await usersQuery
+                    .Select(u => new
+                    {
+                        u.UserId,
+                        u.Name,
+                        u.Department,
+                        u.Role
+                    })
+                    .ToListAsync();
 
-                var tasks = (from u in userList
-                             join tm in allTaskMembers
-                                 on u.UserId.ToString() equals (tm.Assign_To ?? "").Split('-')[0]
-                             join t in allTasks
-                                 on tm.TaskCode equals t.TaskCode
-                             select new
-                             {
-                                 t.TaskCode,
-                                 t.Task,
-                                 t.Status,
-                                 t.Priority,
-                                 t.Members,
-                                 t.Due_Date,
-                                 t.Completed_Date,
-                                 Points = allTaskReviews
-                                     .Where(tr => tr.TaskCode == t.TaskCode)
-                                     .Select(tr => (int?)tr.FinalPoints)
-                                     .FirstOrDefault() ?? 0,
-                                 IsOverdue = t.Status.ToLower() != "completed" && t.Due_Date != null && t.Due_Date < today
-                             }).Distinct().ToList();
-                // ================= GOALS =================
-                var allGoals = await _context.Goal.ToListAsync();
-
-                var goals = (from g in allGoals
-                             where userList.Any(u => u.UserId.ToString() == g.Assign_To)
-                             select new
-                             {
-                                 g.GoalCode,
-                                 g.Title,
-                                 g.Priority,
-                                 g.Status,
-                                 g.DueDate,
-                                 g.Completed_Date,
-                                 IsOverdue = g.Status.ToLower() != "completed" && g.DueDate < today,
-                                 Points = g.Goalpoints,
-                                 Progress = g.Progress,
-                                 Tasks = allTasks
-                                     .Where(t => t.GoalCode == g.GoalCode)
-                                     .Select(t => t.Task)
-                                     .ToList()
-                             }).ToList();
-                // ---------------- LEAVES ----------------
+                // No users found
+                if (!userList.Any())
+                {
+                    return Ok(new
+                    {
+                        users = new List<object>(),
+                        tasks = new List<object>(),
+                        goals = new List<object>(),
+                        leaveList = new List<object>(),
+                        permissionList = new List<object>()
+                    });
+                }
 
                 var userIds = userList
-         .Select(u => u.UserId)
-         .ToList();
+                    .Select(u => u.UserId)
+                    .ToList();
+
+
+                // ============================================================
+                // 2. TASKS
+                // ============================================================
+
+                var allTasks = await _context.Tasks
+                    .ToListAsync();
+
+                var allTaskMembers = await _context.TaskMembers
+                    .ToListAsync();
+
+                var allTaskReviews = await _context.TaskReview
+                    .ToListAsync();
+
+
+                // ------------------------------------------------------------
+                // Get task members belonging to selected users
+                //
+                // Assign_To format:
+                // "12-John"
+                // "15-Keerthana"
+                // ------------------------------------------------------------
+
+                var employeePrefixes = userIds
+                    .Select(id => id + "-")
+                    .ToList();
+
+
+                // ------------------------------------------------------------
+                // Task members assigned to selected employees
+                // ------------------------------------------------------------
+
+                var selectedTaskMembers = allTaskMembers
+                    .Where(tm =>
+                        !string.IsNullOrWhiteSpace(tm.Assign_To) &&
+                        employeePrefixes.Any(prefix =>
+                            tm.Assign_To.StartsWith(prefix)))
+                    .ToList();
+
+
+                // ------------------------------------------------------------
+                // Get task codes belonging to selected employees
+                // ------------------------------------------------------------
+
+                var employeeTaskCodes = selectedTaskMembers
+                    .Where(tm => !string.IsNullOrWhiteSpace(tm.TaskCode))
+                    .Select(tm => tm.TaskCode)
+                    .Distinct()
+                    .ToHashSet();
+
+
+                // ------------------------------------------------------------
+                // Build task response
+                // ------------------------------------------------------------
+
+                var tasks = allTasks
+                    .Where(t =>
+                        !string.IsNullOrWhiteSpace(t.TaskCode) &&
+                        employeeTaskCodes.Contains(t.TaskCode))
+                    .Select(t =>
+                    {
+                        // Reviews are currently matched by TaskCode,
+                        // same as your existing implementation.
+                        var review = allTaskReviews
+                            .FirstOrDefault(tr =>
+                                tr.TaskCode == t.TaskCode);
+
+                        //return new
+                        //{
+                        //    taskCode = t.TaskCode,
+
+                        //    task = t.Task,
+
+                        //    description = t.Description ?? "",
+
+                        //    status = t.Status ?? "",
+
+                        //    priority = t.Priority ?? "",
+
+                        //    members = t.Members,
+
+                        //    createdAt = t.Created_At,
+
+                        //    dueDate = t.Due_Date,
+
+                        //    completedDate = t.Completed_Date,
+
+                        //    points = review?.FinalPoints ?? 0,
+
+                        //    isOverdue =
+                        //        !string.Equals(
+                        //            t.Status,
+                        //            "Completed",
+                        //            StringComparison.OrdinalIgnoreCase) &&
+                        //        t.Due_Date < today
+                        //};
+                        return new
+                        {
+                            taskCode = t.TaskCode,
+
+                            task = t.Task,
+
+                            description = t.Description ?? "",
+
+                            status = t.Status ?? "",
+
+                            priority = t.Priority ?? "",
+
+                            members = t.Members,
+
+                            createdAt = t.Created_At,
+
+                            dueDate = t.Due_Date,
+
+                            completedDate = t.Completed_Date,
+
+                            points = review?.FinalPoints ?? 0,
+
+                            // =====================================================
+                            // TASK QUANTITY
+                            // =====================================================
+
+                            targetQuantity = t.Quantity,
+
+                            completedQuantity = t.CompletedQuantity ?? 0,
+
+                            isOverdue =
+        !string.Equals(
+            t.Status,
+            "Completed",
+            StringComparison.OrdinalIgnoreCase) &&
+        t.Due_Date < today
+                        };
+                    })
+                    .ToList();
+
+
+                // ============================================================
+                // 3. GOALS
+                // ============================================================
+
+                // ------------------------------------------------------------
+                // Get goals assigned to selected users through GoalAssignment
+                // ------------------------------------------------------------
+
+                var assignedGoalIds = await _context.GoalAssignment
+                    .Where(a => userIds.Contains(a.UserId))
+                    .Select(a => a.GoalId)
+                    .Distinct()
+                    .ToListAsync();
+
+                var allGoals = await _context.Goal
+                    .Where(g => assignedGoalIds.Contains(g.Id))
+                    .ToListAsync();
+
+
+                // ------------------------------------------------------------
+                // Include Yearly parent goals
+                //
+                // Example:
+                //
+                // YG001
+                //   └── MG001
+                //
+                // If MG001 belongs to selected user,
+                // include YG001 also.
+                // ------------------------------------------------------------
+
+                var parentGoalIds = allGoals
+                    .Where(g => g.ParentGoalId.HasValue)
+                    .Select(g => g.ParentGoalId!.Value)
+                    .Distinct()
+                    .ToList();
+
+                if (parentGoalIds.Any())
+                {
+                    var parentGoals = await _context.Goal
+                        .Where(g =>
+                            parentGoalIds.Contains(g.Id) &&
+                            g.GoalType == "Yearly")
+                        .ToListAsync();
+
+                    var existingGoalIds = allGoals
+                        .Select(g => g.Id)
+                        .ToHashSet();
+
+                    foreach (var parentGoal in parentGoals)
+                    {
+                        if (!existingGoalIds.Contains(parentGoal.Id))
+                        {
+                            allGoals.Add(parentGoal);
+                        }
+                    }
+                }
+
+
+                // ------------------------------------------------------------
+                // Goal pending quantity
+                // ------------------------------------------------------------
+
+                int? GetPendingQuantity(Goal goal)
+                {
+                    if (!goal.TargetQuantity.HasValue)
+                        return null;
+
+                    int completed =
+                        goal.CompletedQuantity ?? 0;
+
+                    return Math.Max(
+                        0,
+                        goal.TargetQuantity.Value - completed
+                    );
+                }
+
+
+                // ------------------------------------------------------------
+                // Goal response
+                // ------------------------------------------------------------
+
+                //var goals = allGoals
+                //    .OrderBy(g =>
+                //        string.Equals(
+                //            g.GoalType,
+                //            "Yearly",
+                //            StringComparison.OrdinalIgnoreCase)
+                //            ? 0
+                //            : 1)
+                //    .ThenBy(g => g.StartDate)
+                //    .Select(g => new
+                //    {
+                //        goalId = g.Id,
+
+                //        goalCode = g.GoalCode,
+
+                //        goalType = g.GoalType,
+
+                //        parentGoalId = g.ParentGoalId,
+
+                //        title = g.Title,
+
+                //        priority = g.Priority ?? "",
+
+                //        status = g.Status ?? "",
+
+                //        startDate = g.StartDate,
+
+                //        dueDate = g.DueDate,
+
+                //        completedDate = g.Completed_Date,
+
+                //        progress = g.Progress,
+
+                //        points = g.Goalpoints,
+
+                //        isOverdue =
+                //            !string.Equals(
+                //                g.Status,
+                //                "Completed",
+                //                StringComparison.OrdinalIgnoreCase) &&
+                //            g.DueDate < today,
+
+
+                //        // =====================================================
+                //        // IMPORTANT:
+                //        // Only tasks assigned to selected users
+                //        // are included here.
+                //        // =====================================================
+
+                //        tasks = allTasks
+                //            .Where(t =>
+                //                t.GoalCode == g.GoalCode &&
+                //                !string.IsNullOrWhiteSpace(t.TaskCode) &&
+                //                employeeTaskCodes.Contains(t.TaskCode))
+                //            .Select(t => new
+                //            {
+                //                taskCode = t.TaskCode,
+
+                //                task = t.Task,
+
+                //                description = t.Description ?? "",
+
+                //                status = t.Status ?? "",
+
+                //                priority = t.Priority ?? "",
+
+                //                dueDate = t.Due_Date,
+
+                //                completedDate = t.Completed_Date,
+
+                //                members = t.Members
+                //            })
+                //            .ToList()
+                //    })
+                //    .ToList();
+                var goals = allGoals
+    .OrderBy(g =>
+        string.Equals(
+            g.GoalType,
+            "Yearly",
+            StringComparison.OrdinalIgnoreCase)
+            ? 0
+            : 1)
+    .ThenBy(g => g.StartDate)
+    .Select(g => new
+    {
+        goalId = g.Id,
+        goalCode = g.GoalCode,
+        goalType = g.GoalType,
+        parentGoalId = g.ParentGoalId,
+
+        title = g.Title,
+        priority = g.Priority ?? "",
+        status = g.Status ?? "",
+
+        startDate = g.StartDate,
+        dueDate = g.DueDate,
+        completedDate = g.Completed_Date,
+
+        progress = g.Progress,
+        points = g.Goalpoints,
+
+        // =====================================================
+        // GOAL QUANTITY
+        // =====================================================
+
+        targetQuantity = g.TargetQuantity,
+
+        completedQuantity = g.CompletedQuantity ?? 0,
+
+        pendingQuantity = GetPendingQuantity(g),
+
+        isOverdue =
+            !string.Equals(
+                g.Status,
+                "Completed",
+                StringComparison.OrdinalIgnoreCase) &&
+            g.DueDate < today,
+
+        // =====================================================
+        // TASKS UNDER THIS GOAL
+        // =====================================================
+
+        tasks = allTasks
+            .Where(t =>
+                t.GoalCode == g.GoalCode &&
+                !string.IsNullOrWhiteSpace(t.TaskCode) &&
+                employeeTaskCodes.Contains(t.TaskCode))
+            .Select(t => new
+            {
+                taskCode = t.TaskCode,
+
+                task = t.Task,
+
+                description = t.Description ?? "",
+
+                status = t.Status ?? "",
+
+                priority = t.Priority ?? "",
+
+                dueDate = t.Due_Date,
+
+                completedDate = t.Completed_Date,
+
+                members = t.Members,
+
+                // =================================================
+                // TASK QUANTITY
+                // =================================================
+
+                targetQuantity = t.Quantity,
+
+                completedQuantity = t.CompletedQuantity ?? 0
+            })
+            .ToList()
+    })
+    .ToList();
+
+                // ============================================================
+                // 4. LEAVES
+                // ============================================================
 
                 var leaves = await _context.LeaveForm
                     .Where(l =>
@@ -1011,92 +2537,153 @@ namespace staff.Controllers
                         userIds.Contains(l.SenderId))
                     .ToListAsync();
 
+
+                // ------------------------------------------------------------
+                // Compensation IDs
+                // ------------------------------------------------------------
+
                 var compensationIds = leaves
                     .Where(l =>
-                        l.Status != null &&
-                        l.Status.Trim().ToLower() == "approved" &&
+                        !string.IsNullOrWhiteSpace(l.Status) &&
+                        l.Status.Trim().Equals(
+                            "Approved",
+                            StringComparison.OrdinalIgnoreCase) &&
                         l.CompensationExtraWorkId.HasValue)
-                    .Select(l => l.CompensationExtraWorkId!.Value)
+                    .Select(l =>
+                        l.CompensationExtraWorkId!.Value)
                     .Distinct()
                     .ToList();
+
+
+                // ------------------------------------------------------------
+                // Compensation data
+                // ------------------------------------------------------------
 
                 var compensationData = await _context.ExtraWork
                     .Where(x => compensationIds.Contains(x.Id))
                     .ToListAsync();
 
+
+                // ------------------------------------------------------------
+                // Leave response
+                // ------------------------------------------------------------
+
                 var leaveList = leaves
                     .Select(l =>
                     {
-                        var compensation = l.CompensationExtraWorkId.HasValue
-                            ? compensationData.FirstOrDefault(x =>
-                                x.Id == l.CompensationExtraWorkId.Value)
-                            : null;
+                        var compensation =
+                            l.CompensationExtraWorkId.HasValue
+                                ? compensationData.FirstOrDefault(x =>
+                                    x.Id ==
+                                    l.CompensationExtraWorkId.Value)
+                                : null;
+
+                        bool isApproved =
+                            !string.IsNullOrWhiteSpace(l.Status) &&
+                            l.Status.Trim().Equals(
+                                "Approved",
+                                StringComparison.OrdinalIgnoreCase);
 
                         return new
                         {
                             leaveId = l.Id,
+
+                            employeeId = l.SenderId,
+
                             type = l.LeaveType,
-                            status = l.Status,
+
+                            status = l.Status ?? "",
+
                             fromDate = l.FromDate,
+
                             submdate = l.SubmittedDate,
+
                             reason = l.Reason ?? "",
+
                             rejreason = l.RejectionReason,
+
                             approvedate = l.ApprovedDate,
+
                             contactno = l.ContactNumber,
-                            leavecategory=l.LeaveTyp,
+
+                            leavecategory = l.LeaveTyp,
 
                             compensationUsed =
-                                l.Status != null &&
-                                l.Status.Trim().ToLower() == "approved" &&
+                                isApproved &&
                                 l.CompensationExtraWorkId.HasValue,
 
                             compensationExtraWorkId =
                                 l.CompensationExtraWorkId,
 
                             compensationDate =
-                                compensation?.WorkDate,
+                                compensation?.WorkDate
                         };
                     })
                     .ToList();
-                // ---------------- PERMISSIONS ----------------
 
-                var permissionQuery = _context.PermissionForm
-    .Where(p =>
-        userIds.Contains(p.SenderId)
-    );
-                var permissionList = permissionQuery.Select(p => new
-                {
-                    permissionId = p.Id,
-                    date = p.Date,
-                    fromTime = p.FromTime,
-                    toTime = p.ToTime,
-                    reason = p.Reason ?? "",
-                    status = p.Status ?? "",
-                    totalhours = p.TotalHours,
-                    submdate = p.SubmittedDate
-                }).ToList();
 
+                // ============================================================
+                // 5. PERMISSIONS
+                // ============================================================
+
+                var permissionList = await _context.PermissionForm
+                    .Where(p => userIds.Contains(p.SenderId))
+                    .Select(p => new
+                    {
+                        permissionId = p.Id,
+
+                        employeeId = p.SenderId,
+
+                        date = p.Date,
+
+                        fromTime = p.FromTime,
+
+                        toTime = p.ToTime,
+
+                        reason = p.Reason ?? "",
+
+                        status = p.Status ?? "",
+
+                        totalHours = p.TotalHours,
+
+                        submittedDate = p.SubmittedDate
+                    })
+                    .ToListAsync();
+
+
+                // ============================================================
+                // 6. FINAL RESPONSE
+                // ============================================================
 
                 return Ok(new
                 {
+                    users = userList,
+
                     tasks,
+
                     goals,
+
                     leaveList,
+
                     permissionList
                 });
             }
             catch (Exception ex)
             {
-                return BadRequest(new
-                {
-                    message = "Error fetching report",
-                    error = ex.Message
-                });
+                return StatusCode(
+                    500,
+                    new
+                    {
+                        message = "Error fetching filtered report.",
+
+                        error = ex.Message,
+
+                        innerError =
+                            ex.InnerException?.Message
+                    }
+                );
             }
         }
-
-
- 
 
 
     }
