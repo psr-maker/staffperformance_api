@@ -4410,13 +4410,89 @@ namespace staff.Controllers
         }
 
 
+        //[Authorize]
+        //[HttpGet("department-attitude-behaviour-scores")]
+        //public async Task<IActionResult> GetDepartmentAttitudeBehaviourScores()
+        //{
+        //    try
+        //    {
+        //        // Get logged-in user ID from JWT
+        //        var userIdClaim = User.FindFirst("UserId");
+
+        //        if (userIdClaim == null)
+        //            return Unauthorized("User ID not found in token.");
+
+        //        if (!int.TryParse(userIdClaim.Value, out int userId))
+        //            return Unauthorized("Invalid User ID.");
+
+        //        // Get logged-in user
+        //        var loggedInUser = await _context.Users
+        //            .FirstOrDefaultAsync(u => u.UserId == userId);
+
+        //        if (loggedInUser == null)
+        //            return NotFound("Logged-in user not found.");
+
+        //        if (string.IsNullOrWhiteSpace(loggedInUser.Department))
+        //            return BadRequest("User department not found.");
+
+        //        // Get scores of users in the same department
+        //        var scores = await (
+        //            from score in _context.AttitudeBehaviourScore
+        //            join user in _context.Users
+        //                on score.StaffId equals user.UserId
+        //            where user.Department == loggedInUser.Department
+        //            orderby user.Name
+        //            select new
+        //            {
+        //                score.Id,
+        //                StaffId = user.UserId,
+        //                StaffName = user.Name,
+        //                Department = user.Department,
+
+        //                score.Communication,
+        //                score.Punctuality,
+        //                score.Integrity,
+        //                score.Total,
+        //                score.Date
+        //            }
+        //        ).ToListAsync();
+
+        //        return Ok(new
+        //        {
+        //            department = loggedInUser.Department,
+        //            count = scores.Count,
+        //            scores = scores
+        //        });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(
+        //            500,
+        //            new
+        //            {
+        //                message = "Error while getting department attitude & behaviour scores.",
+        //                error = ex.Message
+        //            }
+        //        );
+        //    }
+        //}
+
+
+        //..............................................................................................
+
+
+
+
         [Authorize]
         [HttpGet("department-attitude-behaviour-scores")]
         public async Task<IActionResult> GetDepartmentAttitudeBehaviourScores()
         {
             try
             {
-                // Get logged-in user ID from JWT
+                // =========================================================
+                // 1. GET LOGGED-IN USER
+                // =========================================================
+
                 var userIdClaim = User.FindFirst("UserId");
 
                 if (userIdClaim == null)
@@ -4425,42 +4501,120 @@ namespace staff.Controllers
                 if (!int.TryParse(userIdClaim.Value, out int userId))
                     return Unauthorized("Invalid User ID.");
 
-                // Get logged-in user
                 var loggedInUser = await _context.Users
                     .FirstOrDefaultAsync(u => u.UserId == userId);
 
                 if (loggedInUser == null)
                     return NotFound("Logged-in user not found.");
 
-                if (string.IsNullOrWhiteSpace(loggedInUser.Department))
-                    return BadRequest("User department not found.");
+                var role = loggedInUser.Role;
 
-                // Get scores of users in the same department
+                // =========================================================
+                // 2. DIRECTOR
+                // Role 1 = Director
+                // See ALL Division Heads + Managers
+                // =========================================================
+
+                IQueryable<User> usersQuery = _context.Users;
+
+                if (role == "1")
+                {
+                    // Director can see:
+                    // Role 2 = Division Head
+                    // Role 3 = Manager
+
+                    usersQuery = usersQuery
+                        .Where(u => u.Role == "2" || u.Role == "3");
+                }
+
+                // =========================================================
+                // 3. DIVISION HEAD
+                // Role 2
+                // See Managers in same department
+                // =========================================================
+
+                else if (role == "2")
+                {
+                    if (string.IsNullOrWhiteSpace(loggedInUser.Department))
+                        return BadRequest("User department not found.");
+
+                    usersQuery = usersQuery
+                        .Where(u =>
+                            u.Department == loggedInUser.Department &&
+                            u.Role == "3");
+                }
+
+                // =========================================================
+                // 4. MANAGER
+                // Role 3
+                // See users in same department
+                // =========================================================
+
+                else if (role == "3")
+                {
+                    if (string.IsNullOrWhiteSpace(loggedInUser.Department))
+                        return BadRequest("User department not found.");
+
+                    usersQuery = usersQuery
+                        .Where(u =>
+                            u.Department == loggedInUser.Department);
+                }
+
+                // =========================================================
+                // 5. OTHER ROLES
+                // =========================================================
+
+                else
+                {
+                    return Forbid();
+                }
+
+                // =========================================================
+                // 6. GET ATTITUDE & BEHAVIOUR SCORES
+                // =========================================================
+
                 var scores = await (
                     from score in _context.AttitudeBehaviourScore
-                    join user in _context.Users
+                    join user in usersQuery
                         on score.StaffId equals user.UserId
-                    where user.Department == loggedInUser.Department
-                    orderby user.Name
+
+                    orderby user.Name, score.Date descending
+
                     select new
                     {
                         score.Id,
+
                         StaffId = user.UserId,
                         StaffName = user.Name,
-                        Department = user.Department,
 
-                        score.Communication,
-                        score.Punctuality,
-                        score.Integrity,
-                        score.Total,
-                        score.Date
+                        Department = user.Department,
+                        Role = user.Role,
+
+                        Communication = score.Communication,
+                        Punctuality = score.Punctuality,
+                        Integrity = score.Integrity,
+                        Total = score.Total,
+
+                        Date = score.Date
                     }
                 ).ToListAsync();
 
+                // =========================================================
+                // 7. RESPONSE
+                // =========================================================
+
                 return Ok(new
                 {
-                    department = loggedInUser.Department,
+                    requestedBy = new
+                    {
+                        userId = loggedInUser.UserId,
+                        name = loggedInUser.Name,
+                        role = loggedInUser.Role,
+                        department = loggedInUser.Department
+                    },
+
                     count = scores.Count,
+
                     scores = scores
                 });
             }
@@ -4478,9 +4632,7 @@ namespace staff.Controllers
         }
 
 
-        //..............................................................................................
-
-       [Authorize]
+        [Authorize]
        [HttpPost("create_overtime")]
        public async Task<IActionResult> CreateOvertime(CreateOvertimeDto dto)
         {

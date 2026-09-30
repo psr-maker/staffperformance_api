@@ -360,42 +360,7 @@ namespace staff.Controllers
                 });
             }
 
-            // =========================================================
-            // TOP OVERDUE DEPARTMENT
-            // =========================================================
 
-            var topOverdueDepartment = departmentData
-                .Select(d => new
-                {
-                    Department = (string)d.GetType()
-                        .GetProperty("department")!
-                        .GetValue(d)!,
-
-                    TotalOverdue =
-                        (int)d.GetType()
-                            .GetProperty("tasks")!
-                            .GetValue(d)!
-                            .GetType()
-                            .GetProperty("overdue")!
-                            .GetValue(
-                                d.GetType()
-                                    .GetProperty("tasks")!
-                                    .GetValue(d)!
-                            )
-                        +
-                        (int)d.GetType()
-                            .GetProperty("goals")!
-                            .GetValue(d)!
-                            .GetType()
-                            .GetProperty("overdue")!
-                            .GetValue(
-                                d.GetType()
-                                    .GetProperty("goals")!
-                                    .GetValue(d)!
-                            )
-                })
-                .OrderByDescending(x => x.TotalOverdue)
-                .FirstOrDefault();
 
             // =========================================================
             // FINAL RESULT
@@ -437,11 +402,14 @@ namespace staff.Controllers
 
                 departmentData,
 
-                topOverdueDepartment
+
             };
 
             return Ok(result);
         }
+
+
+
 
         [HttpGet("all-departments-productivity")]
         public async Task<IActionResult> GetAllDepartmentsProductivity(int year,int? month = null,int? quarter = null)
