@@ -24,1005 +24,389 @@ namespace staff.Controllers
         }
 
 
+
         [Authorize]
         [HttpGet("dashboard-summary")]
         public async Task<IActionResult> GetDashboardSummary()
         {
-            try
+            var today = DateTime.Today;
+
+            // =========================================================
+            // USERS
+            // =========================================================
+
+            var totalUsers = await _context.Users.CountAsync();
+
+            // =========================================================
+            // DEPARTMENTS
+            // =========================================================
+
+            var totalDepartments = await _context.Departments.CountAsync();
+
+            // =========================================================
+            // TASK SUMMARY
+            // =========================================================
+
+            var totalTasks = await _context.Tasks.CountAsync();
+
+            var completedTasks = await _context.Tasks
+                .CountAsync(t =>
+                    t.Status != null &&
+                    t.Status.ToLower() == "completed");
+
+            var pendingTasks = await _context.Tasks
+                .CountAsync(t =>
+                    t.Status == null ||
+                    t.Status.ToLower() != "completed");
+
+            var overdueTasks = await _context.Tasks
+                .CountAsync(t =>
+                    t.Due_Date < today &&
+                    (t.Status == null ||
+                     t.Status.ToLower() != "completed"));
+
+            // =========================================================
+            // GOAL SUMMARY
+            // =========================================================
+
+            var totalGoals = await _context.Goal.CountAsync();
+
+            var completedGoals = await _context.Goal
+                .CountAsync(g =>
+                    g.Status != null &&
+                    g.Status.ToLower() == "completed");
+
+            var pendingGoals = await _context.Goal
+                .CountAsync(g =>
+                    g.Status == null ||
+                    g.Status.ToLower() != "completed");
+
+            var overdueGoals = await _context.Goal
+                .CountAsync(g =>
+                    g.DueDate < today &&
+                    (g.Status == null ||
+                     g.Status.ToLower() != "completed"));
+
+            // =========================================================
+            // GOAL COMPLETION %
+            // =========================================================
+
+            double goalCompletionPercentage = totalGoals == 0
+                ? 0
+                : completedGoals * 100.0 / totalGoals;
+
+            // =========================================================
+            // COMPLETED GOALS
+            // =========================================================
+
+            var completedGoalsWithDate = await _context.Goal
+                .Where(g =>
+                    g.Status != null &&
+                    g.Status.ToLower() == "completed" &&
+                    g.Completed_Date.HasValue)
+                .ToListAsync();
+
+            // =========================================================
+            // ON-TIME / DELAYED GOALS
+            // =========================================================
+
+            var onTimeGoals = completedGoalsWithDate
+                .Count(g =>
+                    g.Completed_Date!.Value.Date <= g.DueDate.Date);
+
+            var delayedGoals = completedGoalsWithDate
+                .Count(g =>
+                    g.Completed_Date!.Value.Date > g.DueDate.Date);
+
+            double goalOnTimePercentage =
+                completedGoalsWithDate.Count == 0
+                    ? 0
+                    : onTimeGoals * 100.0 /
+                      completedGoalsWithDate.Count;
+
+            double delayedPercentage =
+                completedGoalsWithDate.Count == 0
+                    ? 0
+                    : delayedGoals * 100.0 /
+                      completedGoalsWithDate.Count;
+
+            // =========================================================
+            // OVERDUE TASK LIST
+            // =========================================================
+
+            var overdueTasksList = await _context.Tasks
+                .Where(t =>
+                    t.Due_Date < today &&
+                    (t.Status == null ||
+                     t.Status.ToLower() != "completed"))
+                .OrderBy(t => t.Due_Date)
+                .Select(t => new
+                {
+                    taskCode = t.TaskCode,
+                    task = t.Task,
+                    description = t.Description ?? "",
+                    priority = t.Priority ?? "",
+                    status = t.Status ?? "",
+                    createdAt = t.Created_At,
+                    dueDate = t.Due_Date,
+                    totalMembers = t.Members,
+                    wasEdited = t.wasEdited
+                })
+                .ToListAsync();
+
+            // =========================================================
+            // OVERDUE GOAL LIST
+            // =========================================================
+
+            var overdueGoalsList = await _context.Goal
+                .Where(g =>
+                    g.DueDate < today &&
+                    (g.Status == null ||
+                     g.Status.ToLower() != "completed"))
+                .OrderBy(g => g.DueDate)
+                .Select(g => new
+                {
+                    goalId = g.Id,
+                    goalCode = g.GoalCode,
+                    goalType = g.GoalType,
+                    parentGoalId = g.ParentGoalId,
+
+                    goal = g.Title,
+                    status = g.Status ?? "",
+                    priority = g.Priority ?? "",
+
+                    createdAt = g.StartDate,
+                    dueDate = g.DueDate,
+
+                    createdBy = g.CreatedBy
+                })
+                .ToListAsync();
+
+            // =========================================================
+            // DEPARTMENT PERFORMANCE
+            // =========================================================
+
+            var departments = await _context.Departments
+                .Select(d => d.DepartmentName)
+                .ToListAsync();
+
+            var departmentData = new List<object>();
+
+            foreach (var departmentName in departments)
             {
-                // =========================================================
-                // TODAY
-                // =========================================================
-                DateTime today = DateTime.Today;
+                // -----------------------------------------------------
+                // USERS IN DEPARTMENT
+                // -----------------------------------------------------
 
-                // =========================================================
-                // LOAD DATA
-                // =========================================================
-                var users = await _context.Users
-                    .AsNoTracking()
+                var departmentUserIds = await _context.Users
+                    .Where(u => u.Department == departmentName)
+                    .Select(u => u.UserId)
                     .ToListAsync();
 
-                var departments = await _context.Departments
-                    .AsNoTracking()
+                // -----------------------------------------------------
+                // TASKS FOR DEPARTMENT
+                // -----------------------------------------------------
+
+                var departmentTaskCodes = await _context.TaskMembers
+                    .Where(tm =>
+                        !string.IsNullOrEmpty(tm.Assign_To))
                     .ToListAsync();
 
-                var allTasks = await _context.Tasks
-                    .AsNoTracking()
-                    .ToListAsync();
+                var taskCodesForDepartment = new List<string>();
 
-                var allTaskMembers = await _context.TaskMembers
-                    .AsNoTracking()
-                    .ToListAsync();
-
-                var allGoals = await _context.Goal
-                    .AsNoTracking()
-                    .ToListAsync();
-
-                var allGoalAssignments = await _context.GoalAssignment
-                    .AsNoTracking()
-                    .ToListAsync();
-
-                // =========================================================
-                // PERCENTAGE HELPER
-                // =========================================================
-                double Percentage(int value, int total)
+                foreach (var member in departmentTaskCodes)
                 {
-                    if (total == 0)
-                        return 0;
-
-                    return Math.Round(
-                        (value * 100.0) / total,
-                        2);
-                }
-
-                // =========================================================
-                // =========================================================
-                // OVERALL TASK STATISTICS
-                // =========================================================
-                // =========================================================
-
-                int totalTasks = allTasks.Count;
-
-                int completedTasks = allTasks.Count(t =>
-                    string.Equals(
-                        t.Status?.Trim(),
-                        "Completed",
-                        StringComparison.OrdinalIgnoreCase));
-
-                int overdueTasks = allTasks.Count(t =>
-                    !string.Equals(
-                        t.Status?.Trim(),
-                        "Completed",
-                        StringComparison.OrdinalIgnoreCase)
-                    && t.Due_Date.Date < today);
-
-                // Pending DOES NOT include overdue
-                int pendingTasks = allTasks.Count(t =>
-                    !string.Equals(
-                        t.Status?.Trim(),
-                        "Completed",
-                        StringComparison.OrdinalIgnoreCase)
-                    && t.Due_Date.Date >= today);
-
-                // =========================================================
-                // OVERALL TASK ON-TIME / DELAYED
-                // =========================================================
-
-                var completedTaskList = allTasks
-                    .Where(t =>
-                        string.Equals(
-                            t.Status?.Trim(),
-                            "Completed",
-                            StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                int onTimeTasks = completedTaskList.Count(t =>
-                    t.Completed_Date != default(DateTime)
-                    && t.Completed_Date.Date <= t.Due_Date.Date);
-
-                int delayedTasks = completedTaskList.Count(t =>
-                    t.Completed_Date != default(DateTime)
-                    && t.Completed_Date.Date > t.Due_Date.Date);
-
-                // =========================================================
-                // OVERALL TASK PERCENTAGES
-                // =========================================================
-
-                double taskCompletionPercentage =
-                    Percentage(
-                        completedTasks,
-                        totalTasks);
-
-                double taskOnTimePercentage =
-                    Percentage(
-                        onTimeTasks,
-                        completedTasks);
-
-                double taskDelayedPercentage =
-                    Percentage(
-                        delayedTasks,
-                        completedTasks);
-
-                // =========================================================
-                // =========================================================
-                // OVERALL GOAL STATISTICS
-                // =========================================================
-                // =========================================================
-
-                int totalGoals = allGoals.Count;
-
-                int completedGoals = allGoals.Count(g =>
-                    string.Equals(
-                        g.Status?.Trim(),
-                        "Completed",
-                        StringComparison.OrdinalIgnoreCase));
-
-                int overdueGoals = allGoals.Count(g =>
-                    !string.Equals(
-                        g.Status?.Trim(),
-                        "Completed",
-                        StringComparison.OrdinalIgnoreCase)
-                    && g.DueDate.Date < today);
-
-                // Pending DOES NOT include overdue
-                int pendingGoals = allGoals.Count(g =>
-                    !string.Equals(
-                        g.Status?.Trim(),
-                        "Completed",
-                        StringComparison.OrdinalIgnoreCase)
-                    && g.DueDate.Date >= today);
-
-                // =========================================================
-                // OVERALL GOAL ON-TIME / DELAYED
-                // =========================================================
-
-                var completedGoalList = allGoals
-                    .Where(g =>
-                        string.Equals(
-                            g.Status?.Trim(),
-                            "Completed",
-                            StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                int onTimeGoals = completedGoalList.Count(g =>
-                    g.Completed_Date != default(DateTime)
-                    && g.Completed_Date.Date <= g.DueDate.Date);
-
-                int delayedGoals = completedGoalList.Count(g =>
-                    g.Completed_Date != default(DateTime)
-                    && g.Completed_Date.Date > g.DueDate.Date);
-
-                // =========================================================
-                // OVERALL GOAL PERCENTAGES
-                // =========================================================
-
-                double goalCompletionPercentage =
-                    Percentage(
-                        completedGoals,
-                        totalGoals);
-
-                double goalOnTimePercentage =
-                    Percentage(
-                        onTimeGoals,
-                        completedGoals);
-
-                double goalDelayedPercentage =
-                    Percentage(
-                        delayedGoals,
-                        completedGoals);
-
-                // =========================================================
-                // =========================================================
-                // DEPARTMENT DATA
-                // =========================================================
-                // =========================================================
-
-                var departmentData = new List<object>();
-
-                foreach (var department in departments)
-                {
-                    string departmentName =
-                        department.DepartmentName?.Trim() ?? "";
-
-                    if (string.IsNullOrWhiteSpace(departmentName))
+                    if (string.IsNullOrWhiteSpace(member.Assign_To))
                         continue;
 
-                    // =====================================================
-                    // USERS
-                    // =====================================================
+                    var assignTo = member.Assign_To;
 
-                    var departmentUsers = users
-                        .Where(u =>
-                            string.Equals(
-                                u.Department?.Trim(),
-                                departmentName,
-                                StringComparison.OrdinalIgnoreCase))
-                        .ToList();
+                    int dashIndex = assignTo.IndexOf("-");
 
-                    var departmentUserIds =
-                        departmentUsers
-                            .Select(u => u.UserId)
-                            .ToHashSet();
+                    string userIdText = dashIndex >= 0
+                        ? assignTo.Substring(0, dashIndex)
+                        : assignTo;
 
-                    int totalDepartmentUsers =
-                        departmentUsers.Count;
-
-                    // =====================================================
-                    // TASK MEMBERS FOR DEPARTMENT
-                    // =====================================================
-
-                    var departmentTaskCodes =
-                        new HashSet<string>();
-
-                    foreach (var member in allTaskMembers)
+                    if (int.TryParse(userIdText, out int assignedUserId))
                     {
-                        if (string.IsNullOrWhiteSpace(member.Assign_To))
-                            continue;
-
-                        /*
-                         * Assign_To example:
-                         *
-                         * 1-John
-                         * 25-Keerthana
-                         */
-
-                        var parts = member.Assign_To.Split(
-                            '-',
-                            2,
-                            StringSplitOptions.TrimEntries);
-
-                        if (parts.Length == 0)
-                            continue;
-
-                        if (!int.TryParse(
-                                parts[0],
-                                out int assignedUserId))
+                        if (departmentUserIds.Contains(assignedUserId))
                         {
-                            continue;
-                        }
-
-                        if (!departmentUserIds.Contains(assignedUserId))
-                            continue;
-
-                        if (!string.IsNullOrWhiteSpace(member.TaskCode))
-                        {
-                            departmentTaskCodes.Add(
-                                member.TaskCode);
+                            taskCodesForDepartment.Add(member.TaskCode);
                         }
                     }
-
-                    // =====================================================
-                    // DEPARTMENT TASKS
-                    // =====================================================
-
-                    var departmentTasks = allTasks
-                        .Where(t =>
-                            departmentTaskCodes.Contains(
-                                t.TaskCode))
-                        .ToList();
-
-                    // =====================================================
-                    // TASK COUNTS
-                    // =====================================================
-
-                    int departmentTotalTasks =
-                        departmentTasks.Count;
-
-                    int departmentCompletedTasks =
-                        departmentTasks.Count(t =>
-                            string.Equals(
-                                t.Status?.Trim(),
-                                "Completed",
-                                StringComparison.OrdinalIgnoreCase));
-
-                    int departmentOverdueTasks =
-                        departmentTasks.Count(t =>
-                            !string.Equals(
-                                t.Status?.Trim(),
-                                "Completed",
-                                StringComparison.OrdinalIgnoreCase)
-                            && t.Due_Date.Date < today);
-
-                    // Pending excludes overdue
-                    int departmentPendingTasks =
-                        departmentTasks.Count(t =>
-                            !string.Equals(
-                                t.Status?.Trim(),
-                                "Completed",
-                                StringComparison.OrdinalIgnoreCase)
-                            && t.Due_Date.Date >= today);
-
-                    // =====================================================
-                    // COMPLETED TASKS
-                    // =====================================================
-
-                    var departmentCompletedTaskList =
-                        departmentTasks
-                            .Where(t =>
-                                string.Equals(
-                                    t.Status?.Trim(),
-                                    "Completed",
-                                    StringComparison.OrdinalIgnoreCase))
-                            .ToList();
-
-                    int departmentOnTimeTasks =
-                        departmentCompletedTaskList.Count(t =>
-                            t.Completed_Date != default(DateTime)
-                            && t.Completed_Date.Date <=
-                               t.Due_Date.Date);
-
-                    int departmentDelayedTasks =
-                        departmentCompletedTaskList.Count(t =>
-                            t.Completed_Date != default(DateTime)
-                            && t.Completed_Date.Date >
-                               t.Due_Date.Date);
-
-                    // =====================================================
-                    // TASK PERCENTAGES
-                    // =====================================================
-
-                    double departmentTaskCompletionPercentage =
-                        Percentage(
-                            departmentCompletedTasks,
-                            departmentTotalTasks);
-
-                    double departmentTaskOnTimePercentage =
-                        Percentage(
-                            departmentOnTimeTasks,
-                            departmentCompletedTasks);
-
-                    double departmentTaskDelayedPercentage =
-                        Percentage(
-                            departmentDelayedTasks,
-                            departmentCompletedTasks);
-
-                    // =====================================================
-                    // DEPARTMENT GOALS
-                    // =====================================================
-
-                    var departmentGoalIds =
-                        allGoalAssignments
-                            .Where(a =>
-                                departmentUserIds.Contains(
-                                    a.UserId))
-                            .Select(a => a.GoalId)
-                            .ToHashSet();
-
-                    var departmentGoals =
-                        allGoals
-                            .Where(g =>
-                                departmentGoalIds.Contains(g.Id))
-                            .ToList();
-
-                    // =====================================================
-                    // ADD YEARLY PARENT GOALS
-                    // =====================================================
-
-                    var parentGoalIds =
-                        departmentGoals
-                            .Where(g =>
-                                g.ParentGoalId.HasValue)
-                            .Select(g =>
-                                g.ParentGoalId.Value)
-                            .ToHashSet();
-
-                    var parentGoals =
-                        allGoals
-                            .Where(g =>
-                                parentGoalIds.Contains(g.Id))
-                            .ToList();
-
-                    departmentGoals.AddRange(parentGoals);
-
-                    // Remove duplicate goals
-                    departmentGoals =
-                        departmentGoals
-                            .GroupBy(g => g.Id)
-                            .Select(g => g.First())
-                            .ToList();
-
-                    // =====================================================
-                    // GOAL COUNTS
-                    // =====================================================
-
-                    int departmentTotalGoals =
-                        departmentGoals.Count;
-
-                    int departmentCompletedGoals =
-                        departmentGoals.Count(g =>
-                            string.Equals(
-                                g.Status?.Trim(),
-                                "Completed",
-                                StringComparison.OrdinalIgnoreCase));
-
-                    int departmentOverdueGoals =
-                        departmentGoals.Count(g =>
-                            !string.Equals(
-                                g.Status?.Trim(),
-                                "Completed",
-                                StringComparison.OrdinalIgnoreCase)
-                            && g.DueDate.Date < today);
-
-                    // Pending excludes overdue
-                    int departmentPendingGoals =
-                        departmentGoals.Count(g =>
-                            !string.Equals(
-                                g.Status?.Trim(),
-                                "Completed",
-                                StringComparison.OrdinalIgnoreCase)
-                            && g.DueDate.Date >= today);
-
-                    // =====================================================
-                    // COMPLETED GOALS
-                    // =====================================================
-
-                    var departmentCompletedGoalList =
-                        departmentGoals
-                            .Where(g =>
-                                string.Equals(
-                                    g.Status?.Trim(),
-                                    "Completed",
-                                    StringComparison.OrdinalIgnoreCase))
-                            .ToList();
-
-                    int departmentOnTimeGoals =
-                        departmentCompletedGoalList.Count(g =>
-                            g.Completed_Date != default(DateTime)
-                            && g.Completed_Date.Date <=
-                               g.DueDate.Date);
-
-                    int departmentDelayedGoals =
-                        departmentCompletedGoalList.Count(g =>
-                            g.Completed_Date != default(DateTime)
-                            && g.Completed_Date.Date >
-                               g.DueDate.Date);
-
-                    // =====================================================
-                    // GOAL PERCENTAGES
-                    // =====================================================
-
-                    double departmentGoalCompletionPercentage =
-                        Percentage(
-                            departmentCompletedGoals,
-                            departmentTotalGoals);
-
-                    double departmentGoalOnTimePercentage =
-                        Percentage(
-                            departmentOnTimeGoals,
-                            departmentCompletedGoals);
-
-                    double departmentGoalDelayedPercentage =
-                        Percentage(
-                            departmentDelayedGoals,
-                            departmentCompletedGoals);
-
-                    // =====================================================
-                    // DEPARTMENT RESULT
-                    // =====================================================
-
-                    departmentData.Add(new
-                    {
-                        department = departmentName,
-
-                        users = new
-                        {
-                            total = totalDepartmentUsers
-                        },
-
-                        tasks = new
-                        {
-                            total = departmentTotalTasks,
-
-                            completed = departmentCompletedTasks,
-
-                            pending = departmentPendingTasks,
-
-                            overdue = departmentOverdueTasks,
-
-                            completionPercentage =
-                                departmentTaskCompletionPercentage,
-
-                            onTimeCompleted =
-                                departmentOnTimeTasks,
-
-                            delayedCompleted =
-                                departmentDelayedTasks,
-
-                            onTimePercentage =
-                                departmentTaskOnTimePercentage,
-
-                            delayedPercentage =
-                                departmentTaskDelayedPercentage
-                        },
-
-                        goals = new
-                        {
-                            total = departmentTotalGoals,
-
-                            completed = departmentCompletedGoals,
-
-                            pending = departmentPendingGoals,
-
-                            overdue = departmentOverdueGoals,
-
-                            completionPercentage =
-                                departmentGoalCompletionPercentage,
-
-                            onTimeCompleted =
-                                departmentOnTimeGoals,
-
-                            delayedCompleted =
-                                departmentDelayedGoals,
-
-                            onTimePercentage =
-                                departmentGoalOnTimePercentage,
-
-                            delayedPercentage =
-                                departmentGoalDelayedPercentage
-                        }
-                    });
                 }
 
-                // =========================================================
-                // FINAL RESPONSE
-                // =========================================================
+                taskCodesForDepartment = taskCodesForDepartment
+                    .Distinct()
+                    .ToList();
 
-                return Ok(new
+                var departmentTasks = await _context.Tasks
+                    .Where(t => taskCodesForDepartment.Contains(t.TaskCode))
+                    .ToListAsync();
+
+                var totalTasksDept = departmentTasks.Count;
+
+                var completedTasksDept = departmentTasks
+                    .Count(t =>
+                        t.Status != null &&
+                        t.Status.ToLower() == "completed");
+
+                var pendingTasksDept = departmentTasks
+                    .Count(t =>
+                        t.Status == null ||
+                        t.Status.ToLower() != "completed");
+
+                var overdueTasksDept = departmentTasks
+                    .Count(t =>
+                        t.Due_Date < today &&
+                        (t.Status == null ||
+                         t.Status.ToLower() != "completed"));
+
+                // -----------------------------------------------------
+                // GOALS FOR DEPARTMENT
+                // -----------------------------------------------------
+                //
+                // New structure:
+                //
+                // Department Users
+                //       ↓
+                // GoalAssignments
+                //       ↓
+                // Goal
+                //
+
+                var departmentGoalIds = await _context.GoalAssignment
+                    .Where(a => departmentUserIds.Contains(a.UserId))
+                    .Select(a => a.GoalId)
+                    .Distinct()
+                    .ToListAsync();
+
+                var departmentGoals = await _context.Goal
+                    .Where(g => departmentGoalIds.Contains(g.Id))
+                    .ToListAsync();
+
+                // -----------------------------------------------------
+                // INCLUDE YEARLY PARENT GOALS
+                // -----------------------------------------------------
+
+                var parentGoalIds = departmentGoals
+                    .Where(g => g.ParentGoalId.HasValue)
+                    .Select(g => g.ParentGoalId!.Value)
+                    .Distinct()
+                    .ToList();
+
+                if (parentGoalIds.Any())
                 {
-                    users = new
-                    {
-                        total = users.Count
-                    },
+                    var parentGoals = await _context.Goal
+                        .Where(g => parentGoalIds.Contains(g.Id))
+                        .ToListAsync();
+
+                    departmentGoals.AddRange(parentGoals);
+                }
+
+                departmentGoals = departmentGoals
+                    .GroupBy(g => g.Id)
+                    .Select(g => g.First())
+                    .ToList();
+
+                var totalGoalsDept = departmentGoals.Count;
+
+                var completedGoalsDept = departmentGoals
+                    .Count(g =>
+                        g.Status != null &&
+                        g.Status.ToLower() == "completed");
+
+                var pendingGoalsDept = departmentGoals
+                    .Count(g =>
+                        g.Status == null ||
+                        g.Status.ToLower() != "completed");
+
+                var overdueGoalsDept = departmentGoals
+                    .Count(g =>
+                        g.DueDate < today &&
+                        (g.Status == null ||
+                         g.Status.ToLower() != "completed"));
+
+                // -----------------------------------------------------
+                // DEPARTMENT RESULT
+                // -----------------------------------------------------
+
+                departmentData.Add(new
+                {
+                    department = departmentName,
 
                     tasks = new
                     {
-                        total = totalTasks,
-
-                        completed = completedTasks,
-
-                        pending = pendingTasks,
-
-                        overdue = overdueTasks,
-
-                        completionPercentage =
-                            taskCompletionPercentage,
-
-                        onTimeCompleted =
-                            onTimeTasks,
-
-                        delayedCompleted =
-                            delayedTasks,
-
-                        onTimePercentage =
-                            taskOnTimePercentage,
-
-                        delayedPercentage =
-                            taskDelayedPercentage
+                        total = totalTasksDept,
+                        completed = completedTasksDept,
+                        pending = pendingTasksDept,
+                        overdue = overdueTasksDept
                     },
 
                     goals = new
                     {
-                        total = totalGoals,
-
-                        completed = completedGoals,
-
-                        pending = pendingGoals,
-
-                        overdue = overdueGoals,
-
-                        completionPercentage =
-                            goalCompletionPercentage,
-
-                        onTimeCompleted =
-                            onTimeGoals,
-
-                        delayedCompleted =
-                            delayedGoals,
-
-                        onTimePercentage =
-                            goalOnTimePercentage,
-
-                        delayedPercentage =
-                            goalDelayedPercentage
+                        total = totalGoalsDept,
+                        completed = completedGoalsDept,
+                        pending = pendingGoalsDept,
+                        overdue = overdueGoalsDept
                     },
 
-                    departments = departmentData
+                    completionPercentage = totalTasksDept == 0
+                        ? 0
+                        : Math.Round(
+                            completedTasksDept * 100.0 /
+                            totalTasksDept,
+                            2)
                 });
             }
-            catch (Exception ex)
+
+
+
+            // =========================================================
+            // FINAL RESULT
+            // =========================================================
+
+            var result = new
             {
-                return StatusCode(500, new
+                totalManagers = totalUsers,
+
+                totalDepartments,
+
+                tasks = new
                 {
-                    message = "Error while loading dashboard summary.",
-                    error = ex.Message,
-                    innerError = ex.InnerException?.Message
-                });
-            }
+                    total = totalTasks,
+                    completed = completedTasks,
+                    pending = pendingTasks,
+                    overdue = overdueTasks
+                },
+
+                goals = new
+                {
+                    total = totalGoals,
+                    completed = completedGoals,
+                    pending = pendingGoals,
+                    overdue = overdueGoals,
+
+                    completionPercentage =
+                        Math.Round(goalCompletionPercentage, 2),
+
+                    onTimeCompletionPercentage =
+                        Math.Round(goalOnTimePercentage, 2),
+
+                    delayedPercentage =
+                        Math.Round(delayedPercentage, 2)
+                },
+
+                overdueTasksList,
+                overdueGoalsList,
+
+                departmentData,
+
+
+            };
+
+            return Ok(result);
         }
-
-
-        //[Authorize]
-        //[HttpGet("dashboard-summary")]
-        //public async Task<IActionResult> GetDashboardSummary()
-        //{
-        //    var today = DateTime.Today;
-
-        //    // =========================================================
-        //    // USERS
-        //    // =========================================================
-
-        //    var totalUsers = await _context.Users.CountAsync();
-
-        //    // =========================================================
-        //    // DEPARTMENTS
-        //    // =========================================================
-
-        //    var totalDepartments = await _context.Departments.CountAsync();
-
-        //    // =========================================================
-        //    // TASK SUMMARY
-        //    // =========================================================
-
-        //    var totalTasks = await _context.Tasks.CountAsync();
-
-        //    var completedTasks = await _context.Tasks
-        //        .CountAsync(t =>
-        //            t.Status != null &&
-        //            t.Status.ToLower() == "completed");
-
-        //    var pendingTasks = await _context.Tasks
-        //        .CountAsync(t =>
-        //            t.Status == null ||
-        //            t.Status.ToLower() != "completed");
-
-        //    var overdueTasks = await _context.Tasks
-        //        .CountAsync(t =>
-        //            t.Due_Date < today &&
-        //            (t.Status == null ||
-        //             t.Status.ToLower() != "completed"));
-
-        //    // =========================================================
-        //    // GOAL SUMMARY
-        //    // =========================================================
-
-        //    var totalGoals = await _context.Goal.CountAsync();
-
-        //    var completedGoals = await _context.Goal
-        //        .CountAsync(g =>
-        //            g.Status != null &&
-        //            g.Status.ToLower() == "completed");
-
-        //    var pendingGoals = await _context.Goal
-        //        .CountAsync(g =>
-        //            g.Status == null ||
-        //            g.Status.ToLower() != "completed");
-
-        //    var overdueGoals = await _context.Goal
-        //        .CountAsync(g =>
-        //            g.DueDate < today &&
-        //            (g.Status == null ||
-        //             g.Status.ToLower() != "completed"));
-
-        //    // =========================================================
-        //    // GOAL COMPLETION %
-        //    // =========================================================
-
-        //    double goalCompletionPercentage = totalGoals == 0
-        //        ? 0
-        //        : completedGoals * 100.0 / totalGoals;
-
-        //    // =========================================================
-        //    // COMPLETED GOALS
-        //    // =========================================================
-
-        //    var completedGoalsWithDate = await _context.Goal
-        //        .Where(g =>
-        //            g.Status != null &&
-        //            g.Status.ToLower() == "completed" &&
-        //            g.Completed_Date.HasValue)
-        //        .ToListAsync();
-
-        //    // =========================================================
-        //    // ON-TIME / DELAYED GOALS
-        //    // =========================================================
-
-        //    var onTimeGoals = completedGoalsWithDate
-        //        .Count(g =>
-        //            g.Completed_Date!.Value.Date <= g.DueDate.Date);
-
-        //    var delayedGoals = completedGoalsWithDate
-        //        .Count(g =>
-        //            g.Completed_Date!.Value.Date > g.DueDate.Date);
-
-        //    double goalOnTimePercentage =
-        //        completedGoalsWithDate.Count == 0
-        //            ? 0
-        //            : onTimeGoals * 100.0 /
-        //              completedGoalsWithDate.Count;
-
-        //    double delayedPercentage =
-        //        completedGoalsWithDate.Count == 0
-        //            ? 0
-        //            : delayedGoals * 100.0 /
-        //              completedGoalsWithDate.Count;
-
-        //    // =========================================================
-        //    // OVERDUE TASK LIST
-        //    // =========================================================
-
-        //    var overdueTasksList = await _context.Tasks
-        //        .Where(t =>
-        //            t.Due_Date < today &&
-        //            (t.Status == null ||
-        //             t.Status.ToLower() != "completed"))
-        //        .OrderBy(t => t.Due_Date)
-        //        .Select(t => new
-        //        {
-        //            taskCode = t.TaskCode,
-        //            task = t.Task,
-        //            description = t.Description ?? "",
-        //            priority = t.Priority ?? "",
-        //            status = t.Status ?? "",
-        //            createdAt = t.Created_At,
-        //            dueDate = t.Due_Date,
-        //            totalMembers = t.Members,
-        //            wasEdited = t.wasEdited
-        //        })
-        //        .ToListAsync();
-
-        //    // =========================================================
-        //    // OVERDUE GOAL LIST
-        //    // =========================================================
-
-        //    var overdueGoalsList = await _context.Goal
-        //        .Where(g =>
-        //            g.DueDate < today &&
-        //            (g.Status == null ||
-        //             g.Status.ToLower() != "completed"))
-        //        .OrderBy(g => g.DueDate)
-        //        .Select(g => new
-        //        {
-        //            goalId = g.Id,
-        //            goalCode = g.GoalCode,
-        //            goalType = g.GoalType,
-        //            parentGoalId = g.ParentGoalId,
-
-        //            goal = g.Title,
-        //            status = g.Status ?? "",
-        //            priority = g.Priority ?? "",
-
-        //            createdAt = g.StartDate,
-        //            dueDate = g.DueDate,
-
-        //            createdBy = g.CreatedBy
-        //        })
-        //        .ToListAsync();
-
-        //    // =========================================================
-        //    // DEPARTMENT PERFORMANCE
-        //    // =========================================================
-
-        //    var departments = await _context.Departments
-        //        .Select(d => d.DepartmentName)
-        //        .ToListAsync();
-
-        //    var departmentData = new List<object>();
-
-        //    foreach (var departmentName in departments)
-        //    {
-        //        // -----------------------------------------------------
-        //        // USERS IN DEPARTMENT
-        //        // -----------------------------------------------------
-
-        //        var departmentUserIds = await _context.Users
-        //            .Where(u => u.Department == departmentName)
-        //            .Select(u => u.UserId)
-        //            .ToListAsync();
-
-        //        // -----------------------------------------------------
-        //        // TASKS FOR DEPARTMENT
-        //        // -----------------------------------------------------
-
-        //        var departmentTaskCodes = await _context.TaskMembers
-        //            .Where(tm =>
-        //                !string.IsNullOrEmpty(tm.Assign_To))
-        //            .ToListAsync();
-
-        //        var taskCodesForDepartment = new List<string>();
-
-        //        foreach (var member in departmentTaskCodes)
-        //        {
-        //            if (string.IsNullOrWhiteSpace(member.Assign_To))
-        //                continue;
-
-        //            var assignTo = member.Assign_To;
-
-        //            int dashIndex = assignTo.IndexOf("-");
-
-        //            string userIdText = dashIndex >= 0
-        //                ? assignTo.Substring(0, dashIndex)
-        //                : assignTo;
-
-        //            if (int.TryParse(userIdText, out int assignedUserId))
-        //            {
-        //                if (departmentUserIds.Contains(assignedUserId))
-        //                {
-        //                    taskCodesForDepartment.Add(member.TaskCode);
-        //                }
-        //            }
-        //        }
-
-        //        taskCodesForDepartment = taskCodesForDepartment
-        //            .Distinct()
-        //            .ToList();
-
-        //        var departmentTasks = await _context.Tasks
-        //            .Where(t => taskCodesForDepartment.Contains(t.TaskCode))
-        //            .ToListAsync();
-
-        //        var totalTasksDept = departmentTasks.Count;
-
-        //        var completedTasksDept = departmentTasks
-        //            .Count(t =>
-        //                t.Status != null &&
-        //                t.Status.ToLower() == "completed");
-
-        //        var pendingTasksDept = departmentTasks
-        //            .Count(t =>
-        //                t.Status == null ||
-        //                t.Status.ToLower() != "completed");
-
-        //        var overdueTasksDept = departmentTasks
-        //            .Count(t =>
-        //                t.Due_Date < today &&
-        //                (t.Status == null ||
-        //                 t.Status.ToLower() != "completed"));
-
-        //        // -----------------------------------------------------
-        //        // GOALS FOR DEPARTMENT
-        //        // -----------------------------------------------------
-        //        //
-        //        // New structure:
-        //        //
-        //        // Department Users
-        //        //       ↓
-        //        // GoalAssignments
-        //        //       ↓
-        //        // Goal
-        //        //
-
-        //        var departmentGoalIds = await _context.GoalAssignment
-        //            .Where(a => departmentUserIds.Contains(a.UserId))
-        //            .Select(a => a.GoalId)
-        //            .Distinct()
-        //            .ToListAsync();
-
-        //        var departmentGoals = await _context.Goal
-        //            .Where(g => departmentGoalIds.Contains(g.Id))
-        //            .ToListAsync();
-
-        //        // -----------------------------------------------------
-        //        // INCLUDE YEARLY PARENT GOALS
-        //        // -----------------------------------------------------
-
-        //        var parentGoalIds = departmentGoals
-        //            .Where(g => g.ParentGoalId.HasValue)
-        //            .Select(g => g.ParentGoalId!.Value)
-        //            .Distinct()
-        //            .ToList();
-
-        //        if (parentGoalIds.Any())
-        //        {
-        //            var parentGoals = await _context.Goal
-        //                .Where(g => parentGoalIds.Contains(g.Id))
-        //                .ToListAsync();
-
-        //            departmentGoals.AddRange(parentGoals);
-        //        }
-
-        //        departmentGoals = departmentGoals
-        //            .GroupBy(g => g.Id)
-        //            .Select(g => g.First())
-        //            .ToList();
-
-        //        var totalGoalsDept = departmentGoals.Count;
-
-        //        var completedGoalsDept = departmentGoals
-        //            .Count(g =>
-        //                g.Status != null &&
-        //                g.Status.ToLower() == "completed");
-
-        //        var pendingGoalsDept = departmentGoals
-        //            .Count(g =>
-        //                g.Status == null ||
-        //                g.Status.ToLower() != "completed");
-
-        //        var overdueGoalsDept = departmentGoals
-        //            .Count(g =>
-        //                g.DueDate < today &&
-        //                (g.Status == null ||
-        //                 g.Status.ToLower() != "completed"));
-
-        //        // -----------------------------------------------------
-        //        // DEPARTMENT RESULT
-        //        // -----------------------------------------------------
-
-        //        departmentData.Add(new
-        //        {
-        //            department = departmentName,
-
-        //            tasks = new
-        //            {
-        //                total = totalTasksDept,
-        //                completed = completedTasksDept,
-        //                pending = pendingTasksDept,
-        //                overdue = overdueTasksDept
-        //            },
-
-        //            goals = new
-        //            {
-        //                total = totalGoalsDept,
-        //                completed = completedGoalsDept,
-        //                pending = pendingGoalsDept,
-        //                overdue = overdueGoalsDept
-        //            },
-
-        //            completionPercentage = totalTasksDept == 0
-        //                ? 0
-        //                : Math.Round(
-        //                    completedTasksDept * 100.0 /
-        //                    totalTasksDept,
-        //                    2)
-        //        });
-        //    }
-
-
-
-        //    // =========================================================
-        //    // FINAL RESULT
-        //    // =========================================================
-
-        //    var result = new
-        //    {
-        //        totalManagers = totalUsers,
-
-        //        totalDepartments,
-
-        //        tasks = new
-        //        {
-        //            total = totalTasks,
-        //            completed = completedTasks,
-        //            pending = pendingTasks,
-        //            overdue = overdueTasks
-        //        },
-
-        //        goals = new
-        //        {
-        //            total = totalGoals,
-        //            completed = completedGoals,
-        //            pending = pendingGoals,
-        //            overdue = overdueGoals,
-
-        //            completionPercentage =
-        //                Math.Round(goalCompletionPercentage, 2),
-
-        //            onTimeCompletionPercentage =
-        //                Math.Round(goalOnTimePercentage, 2),
-
-        //            delayedPercentage =
-        //                Math.Round(delayedPercentage, 2)
-        //        },
-
-        //        overdueTasksList,
-        //        overdueGoalsList,
-
-        //        departmentData,
-
-
-        //    };
-
-        //    return Ok(result);
-        //}
 
 
 

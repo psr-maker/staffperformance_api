@@ -4410,6 +4410,242 @@ namespace staff.Controllers
         }
 
 
+        [Authorize]
+        [HttpGet("department-attitude-behaviour-scores")]
+        public async Task<IActionResult> GetDepartmentAttitudeBehaviourScores()
+        {
+            try
+            {
+                // =========================================================
+                // 1. GET LOGGED-IN USER
+                // =========================================================
+
+                var userIdClaim = User.FindFirst("UserId");
+
+                if (userIdClaim == null)
+                    return Unauthorized("User ID not found in token.");
+
+                if (!int.TryParse(userIdClaim.Value, out int userId))
+                    return Unauthorized("Invalid User ID.");
+
+                var loggedInUser = await _context.Users
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.UserId == userId);
+
+                if (loggedInUser == null)
+                    return NotFound("Logged-in user not found.");
+
+                var role = loggedInUser.Role;
+
+                // =========================================================
+                // 2. USERS TO SHOW
+                // =========================================================
+
+                List<User> usersToShow = new List<User>();
+
+                // =========================================================
+                // ROLE 1 = DIRECTOR
+                // =========================================================
+                // Director can see:
+                // Role 2 = Division Head
+                // Role 3 = Manager
+                // =========================================================
+
+                if (role == "1")
+                {
+                    usersToShow = await _context.Users
+                        .AsNoTracking()
+                        .Where(u =>
+                            u.Role == "2" ||
+                            u.Role == "3")
+                        .OrderBy(u => u.Name)
+                        .ToListAsync();
+                }
+
+                // =========================================================
+                // ROLE 2 = DIVISION HEAD
+                // =========================================================
+                // Get departments from DepartmentAccess
+                //
+                // DepartmentAccess:
+                // UserId          = Division Head
+                // HeadDepartmentId
+                // SubDepartmentId
+                //
+                // Division Head can see Managers belonging to the
+                // departments assigned through DepartmentAccess.
+                // =========================================================
+
+                else if (role == "2")
+                {
+                    var departmentAccess = await _context.DepartmentAccess
+                        .AsNoTracking()
+                        .Where(x => x.UserId == userId)
+                        .ToListAsync();
+
+                    if (!departmentAccess.Any())
+                    {
+                        return Ok(new
+                        {
+                            requestedBy = new
+                            {
+                                userId = loggedInUser.UserId,
+                                name = loggedInUser.Name,
+                                role = loggedInUser.Role,
+                                department = loggedInUser.Department
+                            },
+
+                            count = 0,
+
+                            scores = new List<object>()
+                        });
+                    }
+
+                    // -----------------------------------------------------
+                    // Get all department IDs accessible to this Division Head
+                    // -----------------------------------------------------
+
+                    var accessibleDepartmentIds =
+                        departmentAccess
+                            .SelectMany(x => new[]
+                            {
+                        x.HeadDepartmentId,
+                        x.SubDepartmentId
+                            })
+                            .Where(x => x.HasValue)
+                            .Select(x => x!.Value)
+                            .Distinct()
+                            .ToList();
+
+                    // -----------------------------------------------------
+                    // Get department names
+                    // -----------------------------------------------------
+
+                    var accessibleDepartments = await _context.Departments
+                        .AsNoTracking()
+                        .Where(d =>
+                            accessibleDepartmentIds.Contains(d.Id))
+                        .Select(d => d.DepartmentName)
+                        .ToListAsync();
+
+                    // -----------------------------------------------------
+                    // Get Managers from those departments
+                    // -----------------------------------------------------
+
+                    usersToShow = await _context.Users
+                        .AsNoTracking()
+                        .Where(u =>
+                            u.Role == "3" &&
+                            u.Department != null &&
+                            accessibleDepartments.Contains(u.Department))
+                        .OrderBy(u => u.Department)
+                        .ThenBy(u => u.Name)
+                        .ToListAsync();
+                }
+
+                // =========================================================
+                // ROLE 3 = MANAGER
+                // =========================================================
+                // Manager can see staff belonging to his/her department.
+                // =========================================================
+
+                else if (role == "3")
+                {
+                    if (string.IsNullOrWhiteSpace(loggedInUser.Department))
+                    {
+                        return BadRequest(
+                            "Manager department not found.");
+                    }
+
+                    usersToShow = await _context.Users
+                        .AsNoTracking()
+                        .Where(u =>
+                            u.Department == loggedInUser.Department &&
+                            u.Role != "1" &&
+                            u.Role != "2" &&
+                            u.Role != "3")
+                        .OrderBy(u => u.Name)
+                        .ToListAsync();
+                }
+
+                // =========================================================
+                // OTHER ROLES
+                // =========================================================
+
+                else
+                {
+                    return Forbid();
+                }
+
+                // =========================================================
+                // 3. GET ATTITUDE & BEHAVIOUR SCORES
+                // =========================================================
+
+                var userIds = usersToShow
+                    .Select(u => u.UserId)
+                    .ToList();
+
+                var scores = await (
+                    from score in _context.AttitudeBehaviourScore.AsNoTracking()
+                    join user in _context.Users.AsNoTracking()
+                        on score.StaffId equals user.UserId
+                    where userIds.Contains(user.UserId)
+                    orderby user.Name, score.Date descending
+                    select new
+                    {
+                        score.Id,
+
+                        StaffId = user.UserId,
+                        StaffName = user.Name,
+
+                        Department = user.Department,
+                        Role = user.Role,
+
+                        Communication = score.Communication,
+                        Punctuality = score.Punctuality,
+                        Integrity = score.Integrity,
+                        Total = score.Total,
+
+                        Date = score.Date
+                    }
+                ).ToListAsync();
+
+                // =========================================================
+                // 4. RESPONSE
+                // =========================================================
+
+                return Ok(new
+                {
+                    requestedBy = new
+                    {
+                        userId = loggedInUser.UserId,
+                        name = loggedInUser.Name,
+                        role = loggedInUser.Role,
+                        department = loggedInUser.Department
+                    },
+
+                    count = scores.Count,
+
+                    scores = scores
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(
+                    500,
+                    new
+                    {
+                        message =
+                            "Error while getting hierarchical attitude & behaviour scores.",
+
+                        error = ex.Message,
+
+                        innerError =
+                            ex.InnerException?.Message
+                    });
+            }
+        }
+
         //[Authorize]
         //[HttpGet("department-attitude-behaviour-scores")]
         //public async Task<IActionResult> GetDepartmentAttitudeBehaviourScores()
@@ -4483,153 +4719,153 @@ namespace staff.Controllers
 
 
 
-        [Authorize]
-        [HttpGet("department-attitude-behaviour-scores")]
-        public async Task<IActionResult> GetDepartmentAttitudeBehaviourScores()
-        {
-            try
-            {
-                // =========================================================
-                // 1. GET LOGGED-IN USER
-                // =========================================================
+        //[Authorize]
+        //[HttpGet("department-attitude-behaviour-scores")]
+        //public async Task<IActionResult> GetDepartmentAttitudeBehaviourScores()
+        //{
+        //    try
+        //    {
+        //        // =========================================================
+        //        // 1. GET LOGGED-IN USER
+        //        // =========================================================
 
-                var userIdClaim = User.FindFirst("UserId");
+        //        var userIdClaim = User.FindFirst("UserId");
 
-                if (userIdClaim == null)
-                    return Unauthorized("User ID not found in token.");
+        //        if (userIdClaim == null)
+        //            return Unauthorized("User ID not found in token.");
 
-                if (!int.TryParse(userIdClaim.Value, out int userId))
-                    return Unauthorized("Invalid User ID.");
+        //        if (!int.TryParse(userIdClaim.Value, out int userId))
+        //            return Unauthorized("Invalid User ID.");
 
-                var loggedInUser = await _context.Users
-                    .FirstOrDefaultAsync(u => u.UserId == userId);
+        //        var loggedInUser = await _context.Users
+        //            .FirstOrDefaultAsync(u => u.UserId == userId);
 
-                if (loggedInUser == null)
-                    return NotFound("Logged-in user not found.");
+        //        if (loggedInUser == null)
+        //            return NotFound("Logged-in user not found.");
 
-                var role = loggedInUser.Role;
+        //        var role = loggedInUser.Role;
 
-                // =========================================================
-                // 2. DIRECTOR
-                // Role 1 = Director
-                // See ALL Division Heads + Managers
-                // =========================================================
+        //        // =========================================================
+        //        // 2. DIRECTOR
+        //        // Role 1 = Director
+        //        // See ALL Division Heads + Managers
+        //        // =========================================================
 
-                IQueryable<User> usersQuery = _context.Users;
+        //        IQueryable<User> usersQuery = _context.Users;
 
-                if (role == "1")
-                {
-                    // Director can see:
-                    // Role 2 = Division Head
-                    // Role 3 = Manager
+        //        if (role == "1")
+        //        {
+        //            // Director can see:
+        //            // Role 2 = Division Head
+        //            // Role 3 = Manager
 
-                    usersQuery = usersQuery
-                        .Where(u => u.Role == "2" || u.Role == "3");
-                }
+        //            usersQuery = usersQuery
+        //                .Where(u => u.Role == "2" || u.Role == "3");
+        //        }
 
-                // =========================================================
-                // 3. DIVISION HEAD
-                // Role 2
-                // See Managers in same department
-                // =========================================================
+        //        // =========================================================
+        //        // 3. DIVISION HEAD
+        //        // Role 2
+        //        // See Managers in same department
+        //        // =========================================================
 
-                else if (role == "2")
-                {
-                    if (string.IsNullOrWhiteSpace(loggedInUser.Department))
-                        return BadRequest("User department not found.");
+        //        else if (role == "2")
+        //        {
+        //            if (string.IsNullOrWhiteSpace(loggedInUser.Department))
+        //                return BadRequest("User department not found.");
 
-                    usersQuery = usersQuery
-                        .Where(u =>
-                            u.Department == loggedInUser.Department &&
-                            u.Role == "3");
-                }
+        //            usersQuery = usersQuery
+        //                .Where(u =>
+        //                    u.Department == loggedInUser.Department &&
+        //                    u.Role == "3");
+        //        }
 
-                // =========================================================
-                // 4. MANAGER
-                // Role 3
-                // See users in same department
-                // =========================================================
+        //        // =========================================================
+        //        // 4. MANAGER
+        //        // Role 3
+        //        // See users in same department
+        //        // =========================================================
 
-                else if (role == "3")
-                {
-                    if (string.IsNullOrWhiteSpace(loggedInUser.Department))
-                        return BadRequest("User department not found.");
+        //        else if (role == "3")
+        //        {
+        //            if (string.IsNullOrWhiteSpace(loggedInUser.Department))
+        //                return BadRequest("User department not found.");
 
-                    usersQuery = usersQuery
-                        .Where(u =>
-                            u.Department == loggedInUser.Department);
-                }
+        //            usersQuery = usersQuery
+        //                .Where(u =>
+        //                    u.Department == loggedInUser.Department);
+        //        }
 
-                // =========================================================
-                // 5. OTHER ROLES
-                // =========================================================
+        //        // =========================================================
+        //        // 5. OTHER ROLES
+        //        // =========================================================
 
-                else
-                {
-                    return Forbid();
-                }
+        //        else
+        //        {
+        //            return Forbid();
+        //        }
 
-                // =========================================================
-                // 6. GET ATTITUDE & BEHAVIOUR SCORES
-                // =========================================================
+        //        // =========================================================
+        //        // 6. GET ATTITUDE & BEHAVIOUR SCORES
+        //        // =========================================================
 
-                var scores = await (
-                    from score in _context.AttitudeBehaviourScore
-                    join user in usersQuery
-                        on score.StaffId equals user.UserId
+        //        var scores = await (
+        //            from score in _context.AttitudeBehaviourScore
+        //            join user in usersQuery
+        //                on score.StaffId equals user.UserId
 
-                    orderby user.Name, score.Date descending
+        //            orderby user.Name, score.Date descending
 
-                    select new
-                    {
-                        score.Id,
+        //            select new
+        //            {
+        //                score.Id,
 
-                        StaffId = user.UserId,
-                        StaffName = user.Name,
+        //                StaffId = user.UserId,
+        //                StaffName = user.Name,
 
-                        Department = user.Department,
-                        Role = user.Role,
+        //                Department = user.Department,
+        //                Role = user.Role,
 
-                        Communication = score.Communication,
-                        Punctuality = score.Punctuality,
-                        Integrity = score.Integrity,
-                        Total = score.Total,
+        //                Communication = score.Communication,
+        //                Punctuality = score.Punctuality,
+        //                Integrity = score.Integrity,
+        //                Total = score.Total,
 
-                        Date = score.Date
-                    }
-                ).ToListAsync();
+        //                Date = score.Date
+        //            }
+        //        ).ToListAsync();
 
-                // =========================================================
-                // 7. RESPONSE
-                // =========================================================
+        //        // =========================================================
+        //        // 7. RESPONSE
+        //        // =========================================================
 
-                return Ok(new
-                {
-                    requestedBy = new
-                    {
-                        userId = loggedInUser.UserId,
-                        name = loggedInUser.Name,
-                        role = loggedInUser.Role,
-                        department = loggedInUser.Department
-                    },
+        //        return Ok(new
+        //        {
+        //            requestedBy = new
+        //            {
+        //                userId = loggedInUser.UserId,
+        //                name = loggedInUser.Name,
+        //                role = loggedInUser.Role,
+        //                department = loggedInUser.Department
+        //            },
 
-                    count = scores.Count,
+        //            count = scores.Count,
 
-                    scores = scores
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(
-                    500,
-                    new
-                    {
-                        message = "Error while getting department attitude & behaviour scores.",
-                        error = ex.Message
-                    }
-                );
-            }
-        }
+        //            scores = scores
+        //        });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(
+        //            500,
+        //            new
+        //            {
+        //                message = "Error while getting department attitude & behaviour scores.",
+        //                error = ex.Message
+        //            }
+        //        );
+        //    }
+        //}
 
 
         [Authorize]
