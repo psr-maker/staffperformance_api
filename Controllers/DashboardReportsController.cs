@@ -33,46 +33,31 @@ namespace staff.Controllers
                 // =========================================================
                 // TODAY
                 // =========================================================
-                var today = DateTime.Today;
+                DateTime today = DateTime.Today;
 
                 // =========================================================
-                // LOAD USERS
+                // LOAD DATA
                 // =========================================================
                 var users = await _context.Users
                     .AsNoTracking()
                     .ToListAsync();
 
-                // =========================================================
-                // LOAD DEPARTMENTS
-                // =========================================================
                 var departments = await _context.Departments
                     .AsNoTracking()
                     .ToListAsync();
 
-                // =========================================================
-                // LOAD TASKS
-                // =========================================================
                 var allTasks = await _context.Tasks
                     .AsNoTracking()
                     .ToListAsync();
 
-                // =========================================================
-                // LOAD TASK MEMBERS
-                // =========================================================
                 var allTaskMembers = await _context.TaskMembers
                     .AsNoTracking()
                     .ToListAsync();
 
-                // =========================================================
-                // LOAD GOALS
-                // =========================================================
                 var allGoals = await _context.Goal
                     .AsNoTracking()
                     .ToListAsync();
 
-                // =========================================================
-                // LOAD GOAL ASSIGNMENTS
-                // =========================================================
                 var allGoalAssignments = await _context.GoalAssignment
                     .AsNoTracking()
                     .ToListAsync();
@@ -82,7 +67,7 @@ namespace staff.Controllers
                 // =========================================================
                 double Percentage(int value, int total)
                 {
-                    if (total <= 0)
+                    if (total == 0)
                         return 0;
 
                     return Math.Round(
@@ -104,7 +89,6 @@ namespace staff.Controllers
                         "Completed",
                         StringComparison.OrdinalIgnoreCase));
 
-                // Overdue = not completed + due date already passed
                 int overdueTasks = allTasks.Count(t =>
                     !string.Equals(
                         t.Status?.Trim(),
@@ -112,7 +96,7 @@ namespace staff.Controllers
                         StringComparison.OrdinalIgnoreCase)
                     && t.Due_Date.Date < today);
 
-                // Pending = not completed + not overdue
+                // Pending DOES NOT include overdue
                 int pendingTasks = allTasks.Count(t =>
                     !string.Equals(
                         t.Status?.Trim(),
@@ -121,7 +105,7 @@ namespace staff.Controllers
                     && t.Due_Date.Date >= today);
 
                 // =========================================================
-                // OVERALL COMPLETED TASKS
+                // OVERALL TASK ON-TIME / DELAYED
                 // =========================================================
 
                 var completedTaskList = allTasks
@@ -133,12 +117,16 @@ namespace staff.Controllers
                     .ToList();
 
                 int onTimeTasks = completedTaskList.Count(t =>
-                    t.Completed_Date != default &&
-                    t.Completed_Date.Date <= t.Due_Date.Date);
+                    t.Completed_Date != default(DateTime)
+                    && t.Completed_Date.Date <= t.Due_Date.Date);
 
                 int delayedTasks = completedTaskList.Count(t =>
-                    t.Completed_Date != default &&
-                    t.Completed_Date.Date > t.Due_Date.Date);
+                    t.Completed_Date != default(DateTime)
+                    && t.Completed_Date.Date > t.Due_Date.Date);
+
+                // =========================================================
+                // OVERALL TASK PERCENTAGES
+                // =========================================================
 
                 double taskCompletionPercentage =
                     Percentage(
@@ -169,29 +157,23 @@ namespace staff.Controllers
                         "Completed",
                         StringComparison.OrdinalIgnoreCase));
 
-                // Overdue goal
                 int overdueGoals = allGoals.Count(g =>
                     !string.Equals(
                         g.Status?.Trim(),
                         "Completed",
                         StringComparison.OrdinalIgnoreCase)
-                    && g.DueDate.HasValue
-                    && g.DueDate.Value.Date < today);
+                    && g.DueDate.Date < today);
 
-                // Pending goal
-                // Includes goals without a due date
+                // Pending DOES NOT include overdue
                 int pendingGoals = allGoals.Count(g =>
                     !string.Equals(
                         g.Status?.Trim(),
                         "Completed",
                         StringComparison.OrdinalIgnoreCase)
-                    && (
-                        !g.DueDate.HasValue ||
-                        g.DueDate.Value.Date >= today
-                    ));
+                    && g.DueDate.Date >= today);
 
                 // =========================================================
-                // OVERALL COMPLETED GOALS
+                // OVERALL GOAL ON-TIME / DELAYED
                 // =========================================================
 
                 var completedGoalList = allGoals
@@ -203,16 +185,16 @@ namespace staff.Controllers
                     .ToList();
 
                 int onTimeGoals = completedGoalList.Count(g =>
-                    g.Completed_Date.HasValue &&
-                    g.DueDate.HasValue &&
-                    g.Completed_Date.Value.Date <=
-                    g.DueDate.Value.Date);
+                    g.Completed_Date != default(DateTime)
+                    && g.Completed_Date.Date <= g.DueDate.Date);
 
                 int delayedGoals = completedGoalList.Count(g =>
-                    g.Completed_Date.HasValue &&
-                    g.DueDate.HasValue &&
-                    g.Completed_Date.Value.Date >
-                    g.DueDate.Value.Date);
+                    g.Completed_Date != default(DateTime)
+                    && g.Completed_Date.Date > g.DueDate.Date);
+
+                // =========================================================
+                // OVERALL GOAL PERCENTAGES
+                // =========================================================
 
                 double goalCompletionPercentage =
                     Percentage(
@@ -231,7 +213,7 @@ namespace staff.Controllers
 
                 // =========================================================
                 // =========================================================
-                // DEPARTMENT STATISTICS
+                // DEPARTMENT DATA
                 // =========================================================
                 // =========================================================
 
@@ -246,7 +228,7 @@ namespace staff.Controllers
                         continue;
 
                     // =====================================================
-                    // DEPARTMENT USERS
+                    // USERS
                     // =====================================================
 
                     var departmentUsers = users
@@ -266,7 +248,7 @@ namespace staff.Controllers
                         departmentUsers.Count;
 
                     // =====================================================
-                    // DEPARTMENT TASKS
+                    // TASK MEMBERS FOR DEPARTMENT
                     // =====================================================
 
                     var departmentTaskCodes =
@@ -276,6 +258,13 @@ namespace staff.Controllers
                     {
                         if (string.IsNullOrWhiteSpace(member.Assign_To))
                             continue;
+
+                        /*
+                         * Assign_To example:
+                         *
+                         * 1-John
+                         * 25-Keerthana
+                         */
 
                         var parts = member.Assign_To.Split(
                             '-',
@@ -292,15 +281,19 @@ namespace staff.Controllers
                             continue;
                         }
 
-                        if (departmentUserIds.Contains(assignedUserId))
+                        if (!departmentUserIds.Contains(assignedUserId))
+                            continue;
+
+                        if (!string.IsNullOrWhiteSpace(member.TaskCode))
                         {
-                            if (!string.IsNullOrWhiteSpace(member.TaskCode))
-                            {
-                                departmentTaskCodes.Add(
-                                    member.TaskCode);
-                            }
+                            departmentTaskCodes.Add(
+                                member.TaskCode);
                         }
                     }
+
+                    // =====================================================
+                    // DEPARTMENT TASKS
+                    // =====================================================
 
                     var departmentTasks = allTasks
                         .Where(t =>
@@ -309,7 +302,7 @@ namespace staff.Controllers
                         .ToList();
 
                     // =====================================================
-                    // DEPARTMENT TASK COUNTS
+                    // TASK COUNTS
                     // =====================================================
 
                     int departmentTotalTasks =
@@ -340,7 +333,7 @@ namespace staff.Controllers
                             && t.Due_Date.Date >= today);
 
                     // =====================================================
-                    // DEPARTMENT COMPLETED TASKS
+                    // COMPLETED TASKS
                     // =====================================================
 
                     var departmentCompletedTaskList =
@@ -354,18 +347,18 @@ namespace staff.Controllers
 
                     int departmentOnTimeTasks =
                         departmentCompletedTaskList.Count(t =>
-                            t.Completed_Date != default &&
-                            t.Completed_Date.Date <=
-                            t.Due_Date.Date);
+                            t.Completed_Date != default(DateTime)
+                            && t.Completed_Date.Date <=
+                               t.Due_Date.Date);
 
                     int departmentDelayedTasks =
                         departmentCompletedTaskList.Count(t =>
-                            t.Completed_Date != default &&
-                            t.Completed_Date.Date >
-                            t.Due_Date.Date);
+                            t.Completed_Date != default(DateTime)
+                            && t.Completed_Date.Date >
+                               t.Due_Date.Date);
 
                     // =====================================================
-                    // DEPARTMENT TASK PERCENTAGES
+                    // TASK PERCENTAGES
                     // =====================================================
 
                     double departmentTaskCompletionPercentage =
@@ -410,7 +403,7 @@ namespace staff.Controllers
                             .Where(g =>
                                 g.ParentGoalId.HasValue)
                             .Select(g =>
-                                g.ParentGoalId!.Value)
+                                g.ParentGoalId.Value)
                             .ToHashSet();
 
                     var parentGoals =
@@ -429,7 +422,7 @@ namespace staff.Controllers
                             .ToList();
 
                     // =====================================================
-                    // DEPARTMENT GOAL COUNTS
+                    // GOAL COUNTS
                     // =====================================================
 
                     int departmentTotalGoals =
@@ -448,8 +441,7 @@ namespace staff.Controllers
                                 g.Status?.Trim(),
                                 "Completed",
                                 StringComparison.OrdinalIgnoreCase)
-                            && g.DueDate.HasValue
-                            && g.DueDate.Value.Date < today);
+                            && g.DueDate.Date < today);
 
                     // Pending excludes overdue
                     int departmentPendingGoals =
@@ -458,13 +450,10 @@ namespace staff.Controllers
                                 g.Status?.Trim(),
                                 "Completed",
                                 StringComparison.OrdinalIgnoreCase)
-                            && (
-                                !g.DueDate.HasValue ||
-                                g.DueDate.Value.Date >= today
-                            ));
+                            && g.DueDate.Date >= today);
 
                     // =====================================================
-                    // DEPARTMENT COMPLETED GOALS
+                    // COMPLETED GOALS
                     // =====================================================
 
                     var departmentCompletedGoalList =
@@ -478,20 +467,18 @@ namespace staff.Controllers
 
                     int departmentOnTimeGoals =
                         departmentCompletedGoalList.Count(g =>
-                            g.Completed_Date.HasValue &&
-                            g.DueDate.HasValue &&
-                            g.Completed_Date.Value.Date <=
-                            g.DueDate.Value.Date);
+                            g.Completed_Date != default(DateTime)
+                            && g.Completed_Date.Date <=
+                               g.DueDate.Date);
 
                     int departmentDelayedGoals =
                         departmentCompletedGoalList.Count(g =>
-                            g.Completed_Date.HasValue &&
-                            g.DueDate.HasValue &&
-                            g.Completed_Date.Value.Date >
-                            g.DueDate.Value.Date);
+                            g.Completed_Date != default(DateTime)
+                            && g.Completed_Date.Date >
+                               g.DueDate.Date);
 
                     // =====================================================
-                    // DEPARTMENT GOAL PERCENTAGES
+                    // GOAL PERCENTAGES
                     // =====================================================
 
                     double departmentGoalCompletionPercentage =
@@ -510,7 +497,7 @@ namespace staff.Controllers
                             departmentCompletedGoals);
 
                     // =====================================================
-                    // ADD DEPARTMENT DATA
+                    // DEPARTMENT RESULT
                     // =====================================================
 
                     departmentData.Add(new
@@ -652,6 +639,7 @@ namespace staff.Controllers
                 });
             }
         }
+
 
         //[Authorize]
         //[HttpGet("dashboard-summary")]
