@@ -382,9 +382,8 @@ namespace staff.Controllers
                         "Photo is required."
                     );
                 }
-
-
-                var workDate = dto.WorkDate.Date;
+                var workDate = DateTime.SpecifyKind(dto.WorkDate.Date, DateTimeKind.Unspecified);
+                var currentTime = DateTime.SpecifyKind(DateTime.Now, DateTimeKind.Unspecified);
 
                 string? imagePath = null;
 
@@ -415,8 +414,6 @@ namespace staff.Controllers
 
                 imagePath =
                     "/uploads/worklog/" + fileName;
-
-                var currentTime = DateTime.Now;
 
                 var workLog = new WorkLog
                 {
@@ -491,6 +488,8 @@ namespace staff.Controllers
                 );
             }
         }
+       
+        
         [Authorize]
         [HttpPost("checkout/{id}")]
         [RequestSizeLimit(50_000_000)]
