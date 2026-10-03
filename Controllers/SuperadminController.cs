@@ -1942,11 +1942,24 @@ namespace staff_work_tracking.Controllers
                 });
 
                 // =====================================================
-                // 9. DELETE TASKS
+                // 9. DELETE TASK MEMBERS AND TASKS
                 // =====================================================
 
                 if (tasks.Any())
                 {
+                    var taskCodes = tasks
+                        .Select(t => t.TaskCode)
+                        .ToList();
+
+                    var taskMembers = await _context.TaskMembers
+                        .Where(tm => taskCodes.Contains(tm.TaskCode))
+                        .ToListAsync();
+
+                    if (taskMembers.Any())
+                    {
+                        _context.TaskMembers.RemoveRange(taskMembers);
+                    }
+
                     _context.Tasks.RemoveRange(tasks);
                 }
 

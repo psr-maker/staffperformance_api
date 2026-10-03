@@ -39,5 +39,28 @@ namespace staff_work_tracking.Data
         public DbSet<DepartmentAccess> DepartmentAccess { get; set; }
         public DbSet<GoalAssignment> GoalAssignment { get; set; }
         public DbSet<TaskQuantitySplit> TaskQuantitySplit { get; set; }
+
+
+        //*******************************************************
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<TaskMember>()
+                .HasOne<TaskTable>()
+                .WithMany()
+                .HasForeignKey(x => x.TaskCode)
+                .HasPrincipalKey(x => x.TaskCode)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<TaskQuantitySplit>()
+                .HasOne<TaskTable>()
+                .WithMany()
+                .HasForeignKey(x => x.TaskCode)
+                .HasPrincipalKey(x => x.TaskCode)
+                .OnDelete(DeleteBehavior.Cascade);
+        }
     }
-}
+  
+    }
