@@ -4416,10 +4416,9 @@ namespace staff.Controllers
         {
             try
             {
-                // =========================================================
-                // 1. GET LOGGED-IN USER
-                // =========================================================
-
+                // ============================================================
+                // 1. Get logged-in UserId from JWT
+                // ============================================================
                 var userIdClaim = User.FindFirst("UserId");
 
                 if (userIdClaim == null)
@@ -4428,6 +4427,9 @@ namespace staff.Controllers
                 if (!int.TryParse(userIdClaim.Value, out int userId))
                     return Unauthorized("Invalid User ID.");
 
+                // ============================================================
+                // 2. Get logged-in user
+                // ============================================================
                 var loggedInUser = await _context.Users
                     .AsNoTracking()
                     .FirstOrDefaultAsync(u => u.UserId == userId);
@@ -4437,20 +4439,16 @@ namespace staff.Controllers
 
                 var role = loggedInUser.Role;
 
-                // =========================================================
-                // 2. USERS TO SHOW
-                // =========================================================
+                // This will contain the users whose scores the logged-in user
+                // is allowed to see.
+                List<User> usersToShow;
 
-                List<User> usersToShow = new List<User>();
-
-                // =========================================================
-                // ROLE 1 = DIRECTOR
-                // =========================================================
+                // ============================================================
+                // ROLE 1 - DIRECTOR
                 // Director can see:
-                // Role 2 = Division Head
-                // Role 3 = Manager
-                // =========================================================
-
+                //     Division Heads (Role 2)
+                //     Managers      (Role 3)
+                // ============================================================
                 if (role == "1")
                 {
                     usersToShow = await _context.Users
@@ -4458,24 +4456,21 @@ namespace staff.Controllers
                         .Where(u =>
                             u.Role == "2" ||
                             u.Role == "3")
-                        .OrderBy(u => u.Name)
+                        .OrderBy(u => u.Department)
+                        .ThenBy(u => u.Name)
                         .ToListAsync();
                 }
 
-                // =========================================================
-                // ROLE 2 = DIVISION HEAD
-                // =========================================================
+                // ============================================================
+                // ROLE 2 - DIVISION HEAD
                 // Get departments from DepartmentAccess
+                // using SubDepartmentId
                 //
-                // DepartmentAccess:
-                // UserId          = Division Head
-                // HeadDepartmentId
-                // SubDepartmentId
-                //
-                // Division Head can see Managers belonging to the
-                // departments assigned through DepartmentAccess.
-                // =========================================================
-
+                // IMPORTANT:
+                // SubDepartmentId is int, so DO NOT use:
+                //     .HasValue
+                //     .Value
+                // ============================================================
                 else if (role == "2")
                 {
                     var departmentAccess = await _context.DepartmentAccess
@@ -4494,44 +4489,42 @@ namespace staff.Controllers
                                 role = loggedInUser.Role,
                                 department = loggedInUser.Department
                             },
-
                             count = 0,
-
                             scores = new List<object>()
                         });
                     }
 
-                    // -----------------------------------------------------
-                    // Get all department IDs accessible to this Division Head
-                    // -----------------------------------------------------
+                    // SubDepartmentId is int
+                    var accessibleDepartmentIds = departmentAccess
+                        .Select(x => x.SubDepartmentId)
+                        .Where(id => id > 0)
+                        .Distinct()
+                        .ToList();
 
-                    var accessibleDepartmentIds =
-                        departmentAccess
-                            .SelectMany(x => new[]
+                    if (!accessibleDepartmentIds.Any())
+                    {
+                        return Ok(new
+                        {
+                            requestedBy = new
                             {
-                        x.HeadDepartmentId,
-                        x.SubDepartmentId
-                            })
-                            .Where(x => x.HasValue)
-                            .Select(x => x!.Value)
-                            .Distinct()
-                            .ToList();
+                                userId = loggedInUser.UserId,
+                                name = loggedInUser.Name,
+                                role = loggedInUser.Role,
+                                department = loggedInUser.Department
+                            },
+                            count = 0,
+                            scores = new List<object>()
+                        });
+                    }
 
-                    // -----------------------------------------------------
-                    // Get department names
-                    // -----------------------------------------------------
-
+                    // Get department names using Department IDs
                     var accessibleDepartments = await _context.Departments
                         .AsNoTracking()
-                        .Where(d =>
-                            accessibleDepartmentIds.Contains(d.Id))
+                        .Where(d => accessibleDepartmentIds.Contains(d.Id))
                         .Select(d => d.DepartmentName)
                         .ToListAsync();
 
-                    // -----------------------------------------------------
-                    // Get Managers from those departments
-                    // -----------------------------------------------------
-
+                    // Get Managers belonging to those departments
                     usersToShow = await _context.Users
                         .AsNoTracking()
                         .Where(u =>
@@ -4543,24 +4536,29 @@ namespace staff.Controllers
                         .ToListAsync();
                 }
 
-                // =========================================================
-                // ROLE 3 = MANAGER
-                // =========================================================
-                // Manager can see staff belonging to his/her department.
-                // =========================================================
-
+                // ============================================================
+                // ROLE 3 - MANAGER
+                // Manager can see STAFF from their own department
+                //
+                // Excludes:
+                //     Director
+                //     Division Head
+                //     Manager
+                // ============================================================
                 else if (role == "3")
                 {
                     if (string.IsNullOrWhiteSpace(loggedInUser.Department))
                     {
-                        return BadRequest(
-                            "Manager department not found.");
+                        return BadRequest("Manager department not found.");
                     }
+
+                    var managerDepartment = loggedInUser.Department.Trim();
 
                     usersToShow = await _context.Users
                         .AsNoTracking()
                         .Where(u =>
-                            u.Department == loggedInUser.Department &&
+                            u.Department != null &&
+                            u.Department == managerDepartment &&
                             u.Role != "1" &&
                             u.Role != "2" &&
                             u.Role != "3")
@@ -4568,52 +4566,52 @@ namespace staff.Controllers
                         .ToListAsync();
                 }
 
-                // =========================================================
+                // ============================================================
                 // OTHER ROLES
-                // =========================================================
-
+                // ============================================================
                 else
                 {
                     return Forbid();
                 }
 
-                // =========================================================
-                // 3. GET ATTITUDE & BEHAVIOUR SCORES
-                // =========================================================
-
+                // ============================================================
+                // 3. Get Attitude & Behaviour Scores
+                // ============================================================
                 var userIds = usersToShow
                     .Select(u => u.UserId)
                     .ToList();
 
-                var scores = await (
-                    from score in _context.AttitudeBehaviourScore.AsNoTracking()
-                    join user in _context.Users.AsNoTracking()
-                        on score.StaffId equals user.UserId
-                    where userIds.Contains(user.UserId)
-                    orderby user.Name, score.Date descending
-                    select new
-                    {
-                        score.Id,
+                var scores = await _context.AttitudeBehaviourScore
+                    .AsNoTracking()
+                    .Where(score => userIds.Contains(score.StaffId))
+                    .Join(
+                        _context.Users.AsNoTracking(),
+                        score => score.StaffId,
+                        user => user.UserId,
+                        (score, user) => new
+                        {
+                            score.Id,
+                            StaffId = user.UserId,
+                            StaffName = user.Name,
+                            Department = user.Department,
+                            Role = user.Role,
 
-                        StaffId = user.UserId,
-                        StaffName = user.Name,
+                            Communication = score.Communication,
+                            Punctuality = score.Punctuality,
+                            Integrity = score.Integrity,
+                            Total = score.Total,
 
-                        Department = user.Department,
-                        Role = user.Role,
+                            Date = score.Date
+                        }
+                    )
+                    .OrderBy(x => x.Department)
+                    .ThenBy(x => x.StaffName)
+                    .ThenByDescending(x => x.Date)
+                    .ToListAsync();
 
-                        Communication = score.Communication,
-                        Punctuality = score.Punctuality,
-                        Integrity = score.Integrity,
-                        Total = score.Total,
-
-                        Date = score.Date
-                    }
-                ).ToListAsync();
-
-                // =========================================================
-                // 4. RESPONSE
-                // =========================================================
-
+                // ============================================================
+                // 4. Return response
+                // ============================================================
                 return Ok(new
                 {
                     requestedBy = new
@@ -4624,7 +4622,15 @@ namespace staff.Controllers
                         department = loggedInUser.Department
                     },
 
-                    count = scores.Count,
+                    accessLevel = role == "1"
+                        ? "Director"
+                        : role == "2"
+                            ? "Division Head - DepartmentAccess"
+                            : "Manager - Own Department Staff",
+
+                    usersCount = usersToShow.Count,
+
+                    scoreCount = scores.Count,
 
                     scores = scores
                 });
@@ -4635,16 +4641,15 @@ namespace staff.Controllers
                     500,
                     new
                     {
-                        message =
-                            "Error while getting hierarchical attitude & behaviour scores.",
-
+                        message = "Error while getting department attitude & behaviour scores.",
                         error = ex.Message,
-
-                        innerError =
-                            ex.InnerException?.Message
-                    });
+                        innerError = ex.InnerException?.Message,
+                        innerInnerError = ex.InnerException?.InnerException?.Message
+                    }
+                );
             }
         }
+
 
         //[Authorize]
         //[HttpGet("department-attitude-behaviour-scores")]
