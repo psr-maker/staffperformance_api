@@ -459,6 +459,9 @@ namespace StaffWork_Track.Migrations
                     b.Property<decimal>("TotalScore")
                         .HasColumnType("decimal(65,30)");
 
+                    b.Property<decimal>("WarningPenaltyPoints")
+                        .HasColumnType("decimal(65,30)");
+
                     b.Property<int>("Year")
                         .HasColumnType("int");
 

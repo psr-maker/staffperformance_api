@@ -12,6 +12,17 @@ namespace StaffWork_Track.Services
         {
             _context = context;
         }
+        private static decimal GetWarningPenalty(string? severity)
+        {
+            return severity?.Trim().ToLowerInvariant() switch
+            {
+                "low" => 1m,
+                "medium" => 2m,
+                "high" => 3m,
+                "critical" => 5m,
+                _ => 0m
+            };
+        }
 
         public async Task CalculateMonthly(int staffId, int month, int year)
         {
@@ -27,14 +38,6 @@ namespace StaffWork_Track.Services
                 .Select(t => t.TaskCode)
                 .Distinct()
                 .ToListAsync();
-
-            //var taskScores = await _context.TaskReview
-            //    .Where(r =>
-            //        r.ReviewedAt.Month == month &&
-            //        r.ReviewedAt.Year == year &&
-            //        taskCodes.Contains(r.TaskCode))
-            //    .Select(r => r.FinalPoints)
-            //    .ToListAsync();
 
             var taskScores = await _context.TaskReview
     .Where(r =>
@@ -172,19 +175,42 @@ namespace StaffWork_Track.Services
                 85m
             );
 
-            // =====================================================
-            // TOTAL SCORE /100
-            // =====================================================
+            // =========================================
+            // WARNING PENALTY
+            // Only warnings from this month
+            // =========================================
 
-            decimal totalScore =
-                productivity +
-                attitudeScore;
+            var monthlyWarnings = await _context.Warnings
+                .Where(w =>
+                    w.ReceiverId == staffId &&
+                    w.CreatedDate.Month == month &&
+                    w.CreatedDate.Year == year &&
+                    w.Status != null &&
+                    (
+                        w.Status.Trim().ToLower() == "active" ||
+                        w.Status.Trim().ToLower() == "activ"
+                    ))
+                .Select(w => w.Severity)
+                .ToListAsync();
 
-            totalScore = Math.Clamp(
-                totalScore,
+            decimal warningPenalty = monthlyWarnings
+                .Sum(GetWarningPenalty);
+
+            // =========================================
+            // PERFORMANCE /100
+            // Warnings affect only this score
+            // =========================================
+
+            decimal basePerformance = Math.Clamp(
+                productivity + attitudeScore,
                 0m,
-                100m
-            );
+                100m);
+
+            decimal totalScore = Math.Clamp(
+                basePerformance - warningPenalty,
+                0m,
+                100m);
+
 
             // ================= SAVE =================
 
@@ -205,14 +231,11 @@ namespace StaffWork_Track.Services
                 StaffId = staffId,
                 Month = month,
                 Year = year,
-
                 TaskPoints = finalTaskPoints,
                 GoalPoints = finalGoalPoints,
-
                 AttitudeScore = attitudeScore,
-
                 TaskPenaltyPoints = taskPenaltyPoints,
-
+                WarningPenaltyPoints = warningPenalty,
                 Productivity = productivity,
                 TotalScore = totalScore
             };

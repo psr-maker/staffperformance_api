@@ -1037,106 +1037,105 @@ namespace staff.Controllers
         }
 
 
+
+
         [Authorize]
         [HttpGet("get-warnings")]
         public async Task<IActionResult> GetWarnings()
-        {
-            var userIdClaim = User.FindFirst("UserId")?.Value;
-            var roleClaim = User.FindFirst("Role")?.Value;
-
-            if (!int.TryParse(userIdClaim, out int userId))
-                return Unauthorized("Invalid token.");
-
-            var query = from w in _context.Warnings
-                        join sender in _context.Users
-                            on w.SenderId equals sender.UserId
-                        join receiver in _context.Users
-                            on w.ReceiverId equals receiver.UserId
-                        select new
-                        {
-                            w.WarningId,
-                            w.Title,
-                            w.Message,
-                            w.Severity,
-                            w.EscalationLevel,
-                            w.CreatedDate,
-
-                            SenderId = sender.UserId,
-                            SenderName = sender.Name,
-                            SenderRole = sender.Role,
-
-                            ReceiverId = receiver.UserId,
-                            ReceiverName = receiver.Name,
-                            ReceiverRole = receiver.Role,
-                            ReceiverDept = receiver.Department
-                        };
-
-            if (roleClaim == "1")
-            {
-                // ✅ Director → all warnings
-            }
-            else
-            {
-                // ✅ Everyone else → only their warnings
-                query = query.Where(w => w.ReceiverId == userId);
-            }
-
-            var warnings = await query
-                .OrderByDescending(w => w.CreatedDate)
-                .ToListAsync();
-
-            return Ok(warnings);
-        }
-
-
-        [Authorize]
-        [HttpGet("get-department-warnings")]
-        public async Task<IActionResult> GetDepartmentWarnings()
         {
             try
             {
                 var userIdClaim = User.FindFirst("UserId")?.Value;
                 var roleClaim = User.FindFirst("Role")?.Value;
 
-                if (!int.TryParse(userIdClaim, out int userId))
-                    return Unauthorized("Invalid token.");
-
-                if (roleClaim != "3")
-                    return Forbid("Access denied.");
-
-                var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.UserId == userId);
-
-                if (user == null)
-                    return NotFound("User not found");
-
-                var query = from w in _context.Warnings
-                            join sender in _context.Users
-                                on w.SenderId equals sender.UserId
-                            join receiver in _context.Users
-                                on w.ReceiverId equals receiver.UserId
-                            select new
-                            {
-                                w.WarningId,
-                                w.Title,
-                                w.Message,
-                                w.Severity,
-                                w.EscalationLevel,
-                                w.CreatedDate,
-
-                                SenderId = sender.UserId,
-                                SenderName = sender.Name,
-                                SenderRole = sender.Role,
-
-                                ReceiverId = receiver.UserId,
-                                ReceiverName = receiver.Name,
-                                ReceiverRole = receiver.Role,
-                                ReceiverDept = receiver.Department
-                            };
-             if (roleClaim == "3")
+                if (!int.TryParse(userIdClaim, out int loggedInUserId) ||
+                    string.IsNullOrWhiteSpace(roleClaim))
                 {
-               
-                    query = query.Where(w => w.ReceiverDept == user.Department);
+                    return Unauthorized("Invalid token.");
+                }
+
+                var currentUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == loggedInUserId);
+
+                if (currentUser == null)
+                    return NotFound("User not found.");
+
+                var query =
+                    from w in _context.Warnings
+                    join sender in _context.Users
+                        on w.SenderId equals sender.UserId
+                    join receiver in _context.Users
+                        on w.ReceiverId equals receiver.UserId
+                    select new
+                    {
+                        w.WarningId,
+                        w.Title,
+                        w.Message,
+                        w.Severity,
+                        w.EscalationLevel,
+                        w.CreatedDate,
+
+                        SenderId = sender.UserId,
+                        SenderName = sender.Name,
+                        SenderRole = sender.Role,
+
+                        ReceiverId = receiver.UserId,
+                        ReceiverName = receiver.Name,
+                        ReceiverRole = receiver.Role,
+                        ReceiverDept = receiver.Department
+                    };
+
+                if (roleClaim == "1")
+                {
+                    // Director: all warnings.
+                }
+                else if (roleClaim == "2")
+                {
+                    // Get departments accessible to this Division Head.
+                    var departmentAccess = await _context.DepartmentAccess
+                        .Where(x =>
+                            x.UserId == loggedInUserId &&
+                            x.RoleId == 2)
+                        .ToListAsync();
+
+                    var mySubDepartmentIds = departmentAccess
+                        .Select(x => x.SubDepartmentId)
+                        .Distinct()
+                        .ToHashSet();
+
+                    var departments = await _context.Departments
+                        .ToListAsync();
+
+                    var myDepartmentNames = departments
+                        .Where(d => mySubDepartmentIds.Contains(d.Id))
+                        .Select(d => d.DepartmentName)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Select(name => name.Trim())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    // Get users belonging to accessible departments.
+                    var allowedUserIds = await _context.Users
+                        .Where(u =>
+                            u.Department != null &&
+                            myDepartmentNames.Contains(u.Department.Trim()))
+                        .Select(u => u.UserId)
+                        .ToListAsync();
+
+                    // Return warnings received by users in accessible departments.
+                    query = query.Where(w =>
+                        allowedUserIds.Contains(w.ReceiverId));
+                }
+                else if (roleClaim == "3")
+                {
+                    // Manager: warnings for their own department.
+                    query = query.Where(w =>
+                        w.ReceiverDept == currentUser.Department);
+                }
+                else
+                {
+                    // Other employees: only their own warnings.
+                    query = query.Where(w =>
+                        w.ReceiverId == loggedInUserId);
                 }
 
                 var warnings = await query
@@ -1147,48 +1146,82 @@ namespace staff.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, ex.Message);
+                return StatusCode(500, new
+                {
+                    message = "Error retrieving warnings.",
+                    error = ex.Message
+                });
             }
         }
 
 
-        [HttpGet("get-warnings-by-user/{userId}")]
-        public async Task<IActionResult> GetWarningsByUser(int userId)
+        [Authorize]
+        [HttpGet("get-hr-warnings")]
+        public async Task<IActionResult> GetHRWarnings()
         {
-            var warnings = await (
-                from w in _context.Warnings
-                join sender in _context.Users
-                    on w.SenderId equals sender.UserId
-                join receiver in _context.Users
-                    on w.ReceiverId equals receiver.UserId
-                where w.ReceiverId == userId  
-                orderby w.CreatedDate descending
-                select new
+            try
+            {
+                var userIdClaim = User.FindFirst("UserId")?.Value;
+
+                if (!int.TryParse(userIdClaim, out int userId))
+                    return Unauthorized("Invalid token.");
+
+                // Verify the logged-in user belongs to HR
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == userId);
+
+                if (user == null)
+                    return NotFound("User not found.");
+
+                if (string.IsNullOrWhiteSpace(user.Department) ||
+                    !user.Department.Trim().Equals(
+                        "HR Department",
+                        StringComparison.OrdinalIgnoreCase))
                 {
-                    w.WarningId,
-                    w.Title,
-                    w.Message,
-                    w.Severity,
-                    w.EscalationLevel,
-                    w.CreatedDate,
-
-                    SenderId = sender.UserId,
-                    SenderName = sender.Name,
-                    SenderRole = sender.Role,
-
-                    ReceiverId = receiver.UserId,
-                    ReceiverName = receiver.Name,
-                    ReceiverRole = receiver.Role,
-                    ReceiverDept = receiver.Department
+                    return StatusCode(403, "Access denied. HR department only.");
                 }
-            ).ToListAsync();
 
-            return Ok(warnings);
+                // Get warnings across ALL departments
+                var warnings =
+                    await (from w in _context.Warnings
+                           join sender in _context.Users
+                               on w.SenderId equals sender.UserId
+                           join receiver in _context.Users
+                               on w.ReceiverId equals receiver.UserId
+                           select new
+                           {
+                               w.WarningId,
+                               w.Title,
+                               w.Message,
+                               w.Severity,
+                               w.EscalationLevel,
+                               w.CreatedDate,
+
+                               SenderId = sender.UserId,
+                               SenderName = sender.Name,
+                               SenderRole = sender.Role,
+                               SenderDept = sender.Department,
+
+                               ReceiverId = receiver.UserId,
+                               ReceiverName = receiver.Name,
+                               ReceiverRole = receiver.Role,
+                               ReceiverDept = receiver.Department
+                           })
+                           .OrderByDescending(w => w.CreatedDate)
+                           .ToListAsync();
+
+                return Ok(warnings);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Error retrieving HR warnings.",
+                    error = ex.Message
+                });
+            }
         }
 
-
-
-     
 
     }
 }

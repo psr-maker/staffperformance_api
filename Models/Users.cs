@@ -314,6 +314,9 @@ namespace staff
         // Task removal penalty
         public decimal TaskPenaltyPoints { get; set; }
 
+        public decimal WarningPenaltyPoints { get; set; }
+
+
         // Productivity /85
         public decimal Productivity { get; set; }
 
@@ -634,7 +637,7 @@ namespace staff
         public DateTime Due_Date { get; set; }
         public List<int> AssignedToIds { get; set; }
         public List<RemoveTaskMemberDto> RemovedMembers { get; set; }
- 
+        public string? PerformanceType { get; set; }
         public int? Quantity { get; set; }
 
         public TimeSpan? StartTime { get; set; }
@@ -835,7 +838,7 @@ namespace staff
         public int? ParentGoalId { get; set; }
 
         public List<int>? AssignedUserIds { get; set; }
-
+        public List<int>? YearlyAssignedUserIds { get; set; }
         public List<MonthlyGoalRequest>? MonthlyGoals { get; set; }
     }
     public class MonthlyGoalRequest

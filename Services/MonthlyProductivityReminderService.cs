@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -11,6 +12,8 @@ namespace StaffWork_Track.Services
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<MonthlyProductivityReminderService> _logger;
+
+        private DateTime? _lastReminderDate;
 
         public MonthlyProductivityReminderService(
             IServiceScopeFactory scopeFactory,
@@ -32,6 +35,11 @@ namespace StaffWork_Track.Services
                 {
                     await CheckAndSendMonthEndReminder(stoppingToken);
                 }
+                catch (OperationCanceledException)
+                    when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(
@@ -39,59 +47,74 @@ namespace StaffWork_Track.Services
                         "Monthly productivity reminder error");
                 }
 
-                // Check every minute
-                await Task.Delay(
-                    TimeSpan.FromMinutes(1),
-                    stoppingToken);
+                try
+                {
+                    await Task.Delay(
+                        TimeSpan.FromSeconds(30),
+                        stoppingToken);
+                }
+                catch (OperationCanceledException)
+                    when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
             }
         }
 
         private async Task CheckAndSendMonthEndReminder(
             CancellationToken stoppingToken)
         {
-            // =====================================================
+            // =========================================
             // INDIA TIME
-            // =====================================================
+            // =========================================
 
-            var indiaTimeZone =
-                TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+            TimeZoneInfo indiaTimeZone;
 
-            var indiaNow =
-                TimeZoneInfo.ConvertTimeFromUtc(
-                    DateTime.UtcNow,
-                    indiaTimeZone);
+            try
+            {
+                // Linux VPS
+                indiaTimeZone =
+                    TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                // Windows
+                indiaTimeZone =
+                    TimeZoneInfo.FindSystemTimeZoneById(
+                        "India Standard Time");
+            }
 
-            // =====================================================
-            // GET TOMORROW
-            // =====================================================
+            var indiaNow = TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.UtcNow,
+                indiaTimeZone);
+
+            // =========================================
+            // CHECK DAY BEFORE MONTH END
+            // =========================================
 
             var tomorrow = indiaNow.Date.AddDays(1);
 
-            // =====================================================
-            // CHECK WHETHER TOMORROW IS LAST DAY OF MONTH
-            // =====================================================
-
-            int tomorrowLastDay = DateTime.DaysInMonth(
+            int lastDay = DateTime.DaysInMonth(
                 tomorrow.Year,
                 tomorrow.Month);
 
-            if (tomorrow.Day != tomorrowLastDay)
-            {
+            if (tomorrow.Day != lastDay)
                 return;
-            }
 
-            // =====================================================
-            // SEND AT 12:00 PM
-            // =====================================================
+            // =========================================
+            // SEND AT 12:00 PM IST
+            // =========================================
 
-            if (indiaNow.Hour != 12)
-            {
+            if (indiaNow.Hour != 12 || indiaNow.Minute != 0)
                 return;
-            }
 
-            // =====================================================
-            // GET DATABASE + FIREBASE SERVICES
-            // =====================================================
+            // Prevent duplicate sends during this process run.
+            if (_lastReminderDate == indiaNow.Date)
+                return;
+
+            // =========================================
+            // GET SERVICES
+            // =========================================
 
             using var scope = _scopeFactory.CreateScope();
 
@@ -101,74 +124,88 @@ namespace StaffWork_Track.Services
             var firebase = scope.ServiceProvider
                 .GetRequiredService<FirebaseNotificationService>();
 
-            // =====================================================
-            // GET MANAGER ROLE
-            //
-            // Position 2 = Manager
-            // =====================================================
+            // =========================================
+            // GET ROLES WITH POSITIONS 1, 2, AND 3
+            // =========================================
 
-            var managerRole = await context.Roles
-                .FirstOrDefaultAsync(r =>
-                    r.Position == 3,
-                    stoppingToken);
+            var roleNames = await context.Roles
+                .Where(r =>
+                    r.Position == 1 ||
+                    r.Position == 2 ||
+                    r.Position == 3)
+                .Select(r => r.RoleName)
+                .ToListAsync(stoppingToken);
 
-            if (managerRole == null)
+            if (roleNames.Count == 0)
             {
                 _logger.LogWarning(
-                    "Manager role not found.");
+                    "No roles found for positions 1, 2, and 3.");
 
                 return;
             }
 
-            // =====================================================
-            // GET ALL MANAGERS WITH FCM TOKEN
-            // =====================================================
+            // =========================================
+            // GET USERS WITH FCM TOKENS
+            // =========================================
 
-            var managers = await context.Users
+            var users = await context.Users
                 .Where(u =>
-                    u.Role == managerRole.RoleName &&
+                    roleNames.Contains(u.Role) &&
                     !string.IsNullOrWhiteSpace(u.FcmToken))
                 .ToListAsync(stoppingToken);
 
             _logger.LogInformation(
-                "Found {Count} managers for month-end reminder.",
-                managers.Count);
+                "Found {Count} users with role positions 1, 2, and 3.",
+                users.Count);
 
-            // =====================================================
-            // SEND NOTIFICATION TO ALL MANAGERS
-            // =====================================================
+            // Set before sending to avoid duplicate attempts
+            // if the loop runs again during the same date.
+            _lastReminderDate = indiaNow.Date;
 
-            foreach (var manager in managers)
+            // =========================================
+            // SEND NOTIFICATION
+            // =========================================
+
+            foreach (var user in users)
             {
-                if (string.IsNullOrWhiteSpace(manager.FcmToken))
+                stoppingToken.ThrowIfCancellationRequested();
+
+                if (string.IsNullOrWhiteSpace(user.FcmToken))
                     continue;
 
                 try
                 {
                     await firebase.SendNotificationAsync(
-                        manager.FcmToken!,
-                        "Monthly Productivity Reminder",
-                        "Tomorrow is the last day of the month. " +
-                        "Please update and complete all staff data, " +
-                        "tasks, goals, attendance, leave, permissions " +
-                        "and reviews so monthly productivity can be " +
-                        "calculated correctly."
-                    );
+                        user.FcmToken,
+
+"Monthly Reminder",
+"Tomorrow is the last day of the month. " +
+"Please submit all completed task points, update " +
+"attitude and behaviour scores, and ensure any " +
+"applicable penalties are recorded. Please complete " +
+"all pending updates so monthly performance and " +
+"productivity can be calculated accurately."
+);
 
                     _logger.LogInformation(
-                        "Month-end reminder sent to Manager: " +
-                        "{Name} ({UserId})",
-                        manager.Name,
-                        manager.UserId);
+                        "Month-end reminder sent to {Name} ({UserId}), " +
+                        "Role: {Role}",
+                        user.Name,
+                        user.UserId,
+                        user.Role);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(
                         ex,
-                        "FCM failed for manager {UserId}",
-                        manager.UserId);
+                        "Failed to send reminder to user {UserId}",
+                        user.UserId);
                 }
             }
+
+            _logger.LogInformation(
+                "Monthly productivity reminders processed for {Date}.",
+                indiaNow.ToString("yyyy-MM-dd"));
         }
     }
 }

@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Newtonsoft.Json.Linq;
+using OfficeOpenXml.FormulaParsing.LexicalAnalysis;
 using staff;
 using staff.Services;
 using staff_work_tracking.Data;
@@ -172,6 +174,8 @@ namespace staff_work_tracking.Controllers
             });
         }
 
+
+
         [HttpPost("verify-otp")]
         public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtp request)
         {
@@ -210,10 +214,10 @@ namespace staff_work_tracking.Controllers
             {
                 Subject = new ClaimsIdentity(new[]
                 {
-        new Claim("UserId", user.UserId.ToString()),
-        new Claim("Role", user.Role),
+            new Claim("UserId", user.UserId.ToString()),
+            new Claim("Role", user.Role),
 
-    }),
+        }),
                 Expires = DateTime.UtcNow.AddYears(1),
                 SigningCredentials = new SigningCredentials(
                     new SymmetricSecurityKey(keyBytes),
@@ -246,8 +250,6 @@ namespace staff_work_tracking.Controllers
                 role = user.Role,
                 userId = user.UserId
             });
-
-
 
         }
 

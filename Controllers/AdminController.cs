@@ -1063,132 +1063,111 @@ namespace staff.Controllers
         }
 
 
-        [Authorize]
-        [HttpPut("update-task-status")]
-        public async Task<IActionResult> UpdateTaskStatus(
-            [FromBody] UpdateTaskStatusDto dto)
+[Authorize]
+[HttpPut("update-task-status")]
+public async Task<IActionResult> UpdateTaskStatus(
+    [FromBody] UpdateTaskStatusDto dto)
         {
-            // =====================================================
-            // 1. GET LOGGED-IN USER
-            // =====================================================
-
-            var userIdClaim = User.FindFirst("UserId");
-
-            if (userIdClaim == null)
-                return Unauthorized("Invalid token");
-
-            if (!int.TryParse(userIdClaim.Value, out int userId))
-                return Unauthorized("Invalid UserId in token");
-
-
-            // =====================================================
-            // 2. GET USER
-            // =====================================================
-
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.UserId == userId);
-
-            if (user == null)
-                return NotFound("User not found");
-
-
-            // =====================================================
-            // 3. GET TASK
-            // =====================================================
-
-            var task = await _context.Tasks
-                .FirstOrDefaultAsync(t => t.TaskCode == dto.TaskCode);
-
-            if (task == null)
-                return NotFound("Task not found");
-
-
-            // =====================================================
-            // 4. GET CURRENT USER'S TASK MEMBER
-            // =====================================================
-
-            var taskMember = await _context.TaskMembers
-                .FirstOrDefaultAsync(tm =>
-                    tm.TaskCode == dto.TaskCode &&
-                    !string.IsNullOrWhiteSpace(tm.Assign_To) &&
-                    tm.Assign_To.StartsWith(userId + "-"));
-
-            if (taskMember == null)
-                return BadRequest("User is not assigned to this task");
-
-
-            // =====================================================
-            // 5. VALIDATE STATUS
-            // =====================================================
-
-            if (string.IsNullOrWhiteSpace(dto.Status))
-                return BadRequest("Status is required.");
-
-            var requestedStatus = dto.Status.Trim().ToLower();
-
-
-            // =====================================================
-            // 6. QUANTITY TASK
-            // =====================================================
-
-            if (task.Quantity.HasValue)
+            try
             {
-                // -------------------------------------------------
-                // Completed quantity is required
-                // -------------------------------------------------
+                // 1. GET CURRENT USER
+                var userIdClaim = User.FindFirst("UserId");
 
-                if (!dto.CompletedQuantity.HasValue)
+                if (userIdClaim == null ||
+                    !int.TryParse(userIdClaim.Value, out int userId))
                 {
-                    return BadRequest(new
-                    {
-                        message = "Completed quantity is required for this task.",
-                        quantity = task.Quantity,
-                        completedQuantity = task.CompletedQuantity
-                    });
+                    return Unauthorized("Invalid token or UserId.");
                 }
 
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == userId);
 
-                // -------------------------------------------------
-                // Quantity cannot be negative
-                // -------------------------------------------------
+                if (user == null)
+                    return NotFound("User not found.");
 
-                if (dto.CompletedQuantity.Value < 0)
-                {
-                    return BadRequest(
-                        "Completed quantity cannot be negative.");
-                }
+                // 2. VALIDATE REQUEST
+                if (dto == null)
+                    return BadRequest("Request data is required.");
 
+                if (string.IsNullOrWhiteSpace(dto.TaskCode))
+                    return BadRequest("TaskCode is required.");
 
-                // =================================================
-                // GET ALL SPLITS FOR THIS TASK
-                // =================================================
+                if (string.IsNullOrWhiteSpace(dto.Status))
+                    return BadRequest("Status is required.");
 
-                var shares = await _context.TaskQuantitySplit
-                    .Where(s => s.TaskCode == task.TaskCode)
+                var requestedStatus = dto.Status.Trim().ToLowerInvariant();
+
+                bool isCompleting = requestedStatus == "completed";
+
+                // 3. GET TASK
+                var task = await _context.Tasks
+                    .FirstOrDefaultAsync(t => t.TaskCode == dto.TaskCode);
+
+                if (task == null)
+                    return NotFound("Task not found.");
+
+                // 4. GET CURRENT USER'S TASK MEMBER
+                var taskMember = await _context.TaskMembers
+                    .FirstOrDefaultAsync(tm =>
+                        tm.TaskCode == task.TaskCode &&
+                        !string.IsNullOrWhiteSpace(tm.Assign_To) &&
+                        tm.Assign_To.StartsWith(userId + "-"));
+
+                if (taskMember == null)
+                    return BadRequest("User is not assigned to this task.");
+
+                // 5. GET ALL TASK MEMBERS
+                var allTaskMembers = await _context.TaskMembers
+                    .Where(m => m.TaskCode == task.TaskCode)
                     .ToListAsync();
 
+                // 6. CHECK WHETHER THIS IS A SPLIT TASK
+                bool hasSplit = allTaskMembers.Any(m => m.SplitId.HasValue);
 
-                // =================================================
-                // SPLIT QUANTITY TASK
-                // =================================================
-
-                if (shares.Any())
+                // =========================================================
+                // 7. SPLIT TASK
+                // =========================================================
+                if (hasSplit)
                 {
-                    // -------------------------------------------------
-                    // Current member must have SplitId
-                    // -------------------------------------------------
+                    // Require quantity ONLY when completing the task.
+                    if (isCompleting)
+                    {
+                        if (!dto.CompletedQuantity.HasValue)
+                        {
+                            return BadRequest(new
+                            {
+                                message = "Completed quantity is required when completing the task.",
+                                quantity = task.Quantity,
+                                completedQuantity = task.CompletedQuantity
+                            });
+                        }
 
+                        if (dto.CompletedQuantity.Value < 0)
+                        {
+                            return BadRequest(
+                                "Completed quantity cannot be negative.");
+                        }
+                    }
+
+                    // GET QUANTITY SHARES
+                    var shares = await _context.TaskQuantitySplit
+                        .Where(s => s.TaskCode == task.TaskCode)
+                        .ToListAsync();
+
+                    if (!shares.Any())
+                    {
+                        return BadRequest(
+                            "Split task has no quantity shares.");
+                    }
+
+                    // CURRENT MEMBER MUST HAVE A SPLIT ID
                     if (!taskMember.SplitId.HasValue)
                     {
                         return BadRequest(
                             "This member is not assigned to a quantity share.");
                     }
 
-
-                    // -------------------------------------------------
-                    // Find current member's split
-                    // -------------------------------------------------
-
+                    // GET CURRENT MEMBER'S SPLIT
                     var currentSplit = shares.FirstOrDefault(s =>
                         s.Id == taskMember.SplitId.Value);
 
@@ -1198,73 +1177,42 @@ namespace staff.Controllers
                             "Quantity share not found for this member.");
                     }
 
-
-                    // -------------------------------------------------
-                    // Validate completed quantity against share
-                    // -------------------------------------------------
-
-                    if (dto.CompletedQuantity.Value > currentSplit.Quantity)
+                    // VALIDATE QUANTITY ONLY WHEN A QUANTITY IS PROVIDED
+                    if (dto.CompletedQuantity.HasValue)
                     {
-                        return BadRequest(new
+                        if (dto.CompletedQuantity.Value > currentSplit.Quantity)
                         {
-                            message =
-                                "Completed quantity cannot exceed your assigned share.",
-
-                            shareId = currentSplit.Id,
-
-                            shareQuantity = currentSplit.Quantity,
-
-                            requestedCompletedQuantity =
-                                dto.CompletedQuantity.Value
-                        });
+                            return BadRequest(new
+                            {
+                                message = "Completed quantity cannot exceed your assigned share.",
+                                shareId = currentSplit.Id,
+                                shareQuantity = currentSplit.Quantity,
+                                requestedCompletedQuantity =
+                                    dto.CompletedQuantity.Value
+                            });
+                        }
                     }
 
-
-                    // =================================================
-                    // UPDATE CURRENT MEMBER'S STATUS
-                    // =================================================
-
+                    // UPDATE MEMBER STATUS
                     taskMember.UserStatus = requestedStatus;
 
+                    // Update quantity only when provided.
+                    // For non-completion status changes, null means keep
+                    // the existing completed quantity.
+                    if (dto.CompletedQuantity.HasValue)
+                    {
+                        currentSplit.CompletedQuantity =
+                            dto.CompletedQuantity.Value;
+                    }
 
-                    // =================================================
-                    // UPDATE CURRENT SHARE COMPLETED QUANTITY
-                    // =================================================
-
-                    currentSplit.CompletedQuantity =
-                        dto.CompletedQuantity.Value;
-
-
-                    // =================================================
-                    // GET ALL MEMBERS FOR THIS TASK
-                    // =================================================
-
-                    var allTaskMembers = await _context.TaskMembers
-                        .Where(m => m.TaskCode == task.TaskCode)
-                        .ToListAsync();
-
-
-                    // =================================================
-                    // CHECK EVERY SPLIT
-                    // =================================================
-
+                    // CHECK WHETHER ALL SPLITS ARE COMPLETED
                     bool allSplitsCompleted = true;
-
 
                     foreach (var share in shares)
                     {
-                        // ---------------------------------------------
-                        // Members belonging to this split
-                        // ---------------------------------------------
-
                         var shareMembers = allTaskMembers
                             .Where(m => m.SplitId == share.Id)
                             .ToList();
-
-
-                        // ---------------------------------------------
-                        // Safety check
-                        // ---------------------------------------------
 
                         if (!shareMembers.Any())
                         {
@@ -1272,281 +1220,266 @@ namespace staff.Controllers
                             break;
                         }
 
-
-                        // ---------------------------------------------
-                        // Check ALL members of this split
-                        // ---------------------------------------------
-
                         bool allMembersCompleted = shareMembers.All(m =>
                             !string.IsNullOrWhiteSpace(m.UserStatus) &&
                             m.UserStatus.Trim().Equals(
                                 "completed",
                                 StringComparison.OrdinalIgnoreCase));
 
-
-                        // ---------------------------------------------
-                        // Check quantity of this split
-                        // ---------------------------------------------
-
-                        bool quantityCompleted =
-                            share.CompletedQuantity >= share.Quantity;
-
-
-                        // ---------------------------------------------
-                        // BOTH must be completed
-                        // ---------------------------------------------
-
-                        if (!allMembersCompleted || !quantityCompleted)
+                        if (!allMembersCompleted)
                         {
                             allSplitsCompleted = false;
                             break;
                         }
                     }
 
-
-                    // =================================================
-                    // CALCULATE MAIN TASK COMPLETED QUANTITY
-                    // =================================================
-
+                    // UPDATE MAIN TASK COMPLETED QUANTITY
                     task.CompletedQuantity = shares
                         .Sum(s => s.CompletedQuantity);
 
-
-                    // =================================================
                     // UPDATE MAIN TASK STATUS
-                    // =================================================
+                    task.Status = allSplitsCompleted
+                        ? "completed"
+                        : "inprogress";
+                }
 
-                    if (allSplitsCompleted)
+                // =========================================================
+                // 8. NORMAL TASK (NO SPLIT)
+                // =========================================================
+                else
+                {
+                    // Require quantity only when completing a task
+                    // that has a defined quantity.
+                    if (isCompleting && task.Quantity.HasValue)
                     {
+                        if (!dto.CompletedQuantity.HasValue)
+                        {
+                            return BadRequest(new
+                            {
+                                message = "Completed quantity is required when completing the task.",
+                                quantity = task.Quantity,
+                                completedQuantity = task.CompletedQuantity
+                            });
+                        }
+
+                        if (dto.CompletedQuantity.Value < 0)
+                        {
+                            return BadRequest(
+                                "Completed quantity cannot be negative.");
+                        }
+
+                        if (dto.CompletedQuantity.Value > task.Quantity.Value)
+                        {
+                            return BadRequest(new
+                            {
+                                message = "Completed quantity cannot exceed the task quantity.",
+                                quantity = task.Quantity,
+                                requestedCompletedQuantity =
+                                    dto.CompletedQuantity.Value
+                            });
+                        }
+                    }
+
+                    // UPDATE CURRENT MEMBER STATUS
+                    taskMember.UserStatus = requestedStatus;
+
+                    // Update quantity only when provided.
+                    // Status-only updates leave the existing quantity unchanged.
+                    if (dto.CompletedQuantity.HasValue)
+                    {
+                        if (!task.Quantity.HasValue)
+                        {
+                            return BadRequest(
+                                "This task does not have a defined quantity.");
+                        }
+
+                        if (dto.CompletedQuantity.Value < 0)
+                        {
+                            return BadRequest(
+                                "Completed quantity cannot be negative.");
+                        }
+
+                        if (dto.CompletedQuantity.Value > task.Quantity.Value)
+                        {
+                            return BadRequest(
+                                "Completed quantity cannot exceed the task quantity.");
+                        }
+
+                        task.CompletedQuantity = dto.CompletedQuantity.Value;
+                    }
+
+                    if (isCompleting)
+                    {
+                        // Main task completed
                         task.Status = "completed";
+
+                        // Complete the task for all assigned members
+                        foreach (var member in allTaskMembers)
+                        {
+                            member.UserStatus = "completed";
+                        }
                     }
                     else
                     {
-                        task.Status = "inprogress";
+                        // Other statuses do not require completed quantity
+                        task.Status = requestedStatus;
                     }
                 }
-                else
+
+                // =========================================================
+                // 9. UPDATE TASK COMPLETED DATE
+                // =========================================================
+                if (!string.IsNullOrWhiteSpace(task.Status) &&
+                    task.Status.Trim().Equals(
+                        "completed",
+                        StringComparison.OrdinalIgnoreCase))
                 {
-                    // =================================================
-                    // NORMAL QUANTITY TASK WITHOUT SPLITS
-                    // =================================================
+                    var indiaTimeZone =
+                        TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
 
-                    taskMember.UserStatus = requestedStatus;
-
-                    task.CompletedQuantity =
-                        dto.CompletedQuantity.Value;
-
-                    task.Status = requestedStatus;
-                }
-            }
-            else
-            {
-                // =====================================================
-                // NORMAL TASK WITHOUT QUANTITY
-                // =====================================================
-
-                taskMember.UserStatus = requestedStatus;
-
-                task.CompletedQuantity = null;
-
-                task.Status = requestedStatus;
-            }
-
-
-            // =====================================================
-            // 7. COMPLETED DATE
-            // =====================================================
-
-            if (!string.IsNullOrWhiteSpace(task.Status) &&
-                task.Status.Trim().Equals(
-                    "completed",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                var indiaTimeZone =
-                    TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
-
-                task.Completed_Date =
-                    TimeZoneInfo.ConvertTimeFromUtc(
-                        DateTime.UtcNow,
-                        indiaTimeZone);
-            }
-            else
-            {
-                task.Completed_Date = default(DateTime);
-            }
-
-
-            // =====================================================
-            // 8. SAVE TASK + MEMBER + SPLIT
-            // =====================================================
-
-            await _context.SaveChangesAsync();
-
-
-            // =====================================================
-            // 9. UPDATE GOAL
-            // =====================================================
-
-            if (!string.IsNullOrWhiteSpace(task.GoalCode))
-            {
-                var goal = await _context.Goal
-                    .FirstOrDefaultAsync(g =>
-                        g.GoalCode == task.GoalCode);
-
-                if (goal != null)
-                {
-                    // =================================================
-                    // GET ALL TASKS FOR GOAL
-                    // =================================================
-
-                    var goalTasks = await _context.Tasks
-                        .Where(t => t.GoalCode == goal.GoalCode)
-                        .ToListAsync();
-
-
-                    // =================================================
-                    // TOTAL TASKS
-                    // =================================================
-
-                    int total = goalTasks.Count;
-
-
-                    // =================================================
-                    // COMPLETED TASKS
-                    // =================================================
-
-                    int completed = goalTasks.Count(t =>
-                        !string.IsNullOrWhiteSpace(t.Status) &&
-                        t.Status.Trim().Equals(
-                            "completed",
-                            StringComparison.OrdinalIgnoreCase));
-
-
-                    // =================================================
-                    // NOT STARTED TASKS
-                    // =================================================
-
-                    int notStarted = goalTasks.Count(t =>
-                        !string.IsNullOrWhiteSpace(t.Status) &&
-                        (
-                            t.Status.Trim().Equals(
-                                "not started",
-                                StringComparison.OrdinalIgnoreCase)
-                            ||
-                            t.Status.Trim().Equals(
-                                "notstarted",
-                                StringComparison.OrdinalIgnoreCase)
-                        ));
-
-
-                    // =================================================
-                    // UPDATE GOAL STATUS
-                    // =================================================
-
-                    if (total > 0 && completed == total)
+                    // Preserve the original completion date if already set.
+                    if (task.Completed_Date == default(DateTime))
                     {
-                        goal.Status = "completed";
-
-                        var indiaTimeZone =
-                            TimeZoneInfo.FindSystemTimeZoneById(
-                                "Asia/Kolkata");
-
-                        goal.Completed_Date =
+                        task.Completed_Date =
                             TimeZoneInfo.ConvertTimeFromUtc(
                                 DateTime.UtcNow,
                                 indiaTimeZone);
                     }
-                    else if (total > 0 && notStarted == total)
+                }
+                else
+                {
+                    task.Completed_Date = default(DateTime);
+                }
+
+                // =========================================================
+                // 10. SAVE TASK, MEMBERS AND SPLITS
+                // =========================================================
+                await _context.SaveChangesAsync();
+
+                // =========================================================
+                // 11. UPDATE GOAL
+                // =========================================================
+                if (!string.IsNullOrWhiteSpace(task.GoalCode))
+                {
+                    var goal = await _context.Goal
+                        .FirstOrDefaultAsync(g =>
+                            g.GoalCode == task.GoalCode);
+
+                    if (goal != null)
                     {
-                        goal.Status = "not started";
+                        var goalTasks = await _context.Tasks
+                            .Where(t => t.GoalCode == goal.GoalCode)
+                            .ToListAsync();
 
-                        goal.Completed_Date = null;
-                    }
-                    else
-                    {
-                        goal.Status = "inprogress";
+                        int total = goalTasks.Count;
 
-                        goal.Completed_Date = null;
-                    }
+                        int completed = goalTasks.Count(t =>
+                            !string.IsNullOrWhiteSpace(t.Status) &&
+                            t.Status.Trim().Equals(
+                                "completed",
+                                StringComparison.OrdinalIgnoreCase));
 
+                        int notStarted = goalTasks.Count(t =>
+                            !string.IsNullOrWhiteSpace(t.Status) &&
+                            (
+                                t.Status.Trim().Equals(
+                                    "not started",
+                                    StringComparison.OrdinalIgnoreCase)
+                                ||
+                                t.Status.Trim().Equals(
+                                    "notstarted",
+                                    StringComparison.OrdinalIgnoreCase)
+                            ));
 
-                    // =================================================
-                    // UPDATE GOAL PROGRESS
-                    // =================================================
+                        // UPDATE GOAL STATUS
+                        if (total > 0 && completed == total)
+                        {
+                            goal.Status = "completed";
 
-                    goal.Progress =
-                        total == 0
+                            var indiaTimeZone =
+                                TimeZoneInfo.FindSystemTimeZoneById(
+                                    "Asia/Kolkata");
+
+                            if (!goal.Completed_Date.HasValue)
+                            {
+                                goal.Completed_Date =
+                                    TimeZoneInfo.ConvertTimeFromUtc(
+                                        DateTime.UtcNow,
+                                        indiaTimeZone);
+                            }
+                        }
+                        else if (total > 0 && notStarted == total)
+                        {
+                            goal.Status = "not started";
+                            goal.Completed_Date = null;
+                        }
+                        else
+                        {
+                            goal.Status = "inprogress";
+                            goal.Completed_Date = null;
+                        }
+
+                        // UPDATE GOAL PROGRESS
+                        goal.Progress = total == 0
                             ? 0
                             : (int)(((double)completed / total) * 100);
 
+                        // UPDATE GOAL COMPLETED QUANTITY
+                        if (goal.TargetQuantity.HasValue)
+                        {
+                            int completedQuantity = goalTasks
+                                .Where(t => t.CompletedQuantity.HasValue)
+                                .Sum(t => t.CompletedQuantity!.Value);
 
-                    // =================================================
-                    // UPDATE GOAL COMPLETED QUANTITY
-                    // =================================================
+                            goal.CompletedQuantity = completedQuantity;
+                        }
+                        else
+                        {
+                            goal.CompletedQuantity = null;
+                        }
 
-                    if (goal.TargetQuantity.HasValue)
-                    {
-                        int completedQuantity = goalTasks
-                            .Where(t => t.CompletedQuantity.HasValue)
-                            .Sum(t => t.CompletedQuantity!.Value);
-
-                        goal.CompletedQuantity =
-                            completedQuantity;
+                        await _context.SaveChangesAsync();
                     }
-                    else
-                    {
-                        goal.CompletedQuantity = null;
-                    }
-
-
-                    // =================================================
-                    // SAVE GOAL
-                    // =================================================
-
-                    await _context.SaveChangesAsync();
                 }
-            }
 
-
-            // =====================================================
-            // 10. RESPONSE
-            // =====================================================
-
-            return Ok(new
-            {
-                message = "Task status updated successfully",
-
-                taskCode = task.TaskCode,
-
-                userId = userId,
-
-                status = task.Status,
-
-                quantity = task.Quantity,
-
-                completedQuantity =
-                    task.CompletedQuantity,
-
-                pendingQuantity =
-                    task.Quantity.HasValue
+                // =========================================================
+                // 12. RESPONSE
+                // =========================================================
+                return Ok(new
+                {
+                    message = "Task status updated successfully.",
+                    taskCode = task.TaskCode,
+                    userId = userId,
+                    status = task.Status,
+                    quantity = task.Quantity,
+                    completedQuantity = task.CompletedQuantity,
+                    pendingQuantity = task.Quantity.HasValue
                         ? Math.Max(
                             0,
                             task.Quantity.Value -
                             (task.CompletedQuantity ?? 0))
                         : (int?)null,
-
-                completedDate =
-                    task.Completed_Date == default(DateTime)
-                        ? (DateTime?)null
-                        : task.Completed_Date
-            });
+                    completedDate =
+                        task.Completed_Date == default(DateTime)
+                            ? (DateTime?)null
+                            : task.Completed_Date
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while updating task status.",
+                    error = ex.Message
+                });
+            }
         }
+
 
         [Authorize]
         [HttpPost("review-task")]
         public async Task<IActionResult> SubmitReview([FromBody] ReviewTaskDto dto)
         {
-
             if (dto == null)
                 return BadRequest("Review data is required.");
 
@@ -1556,7 +1489,13 @@ namespace staff.Controllers
             if (dto.StaffId <= 0)
                 return BadRequest("StaffId is required.");
 
-            // If delay is justified, reason is mandatory
+            // Manager points are required for every review
+            if (!dto.ManagerPoints.HasValue)
+                return BadRequest("Manager Points are required.");
+
+            if (dto.ManagerPoints.Value < 0 || dto.ManagerPoints.Value > 100)
+                return BadRequest("Manager Points must be between 0 and 100.");
+
             if (dto.IsDelayJustified &&
                 string.IsNullOrWhiteSpace(dto.DelayReason))
             {
@@ -1564,28 +1503,13 @@ namespace staff.Controllers
                     "Delay reason is required when delay is justified.");
             }
 
-            if (dto.IsDelayJustified &&
-                !dto.ManagerPoints.HasValue)
-            {
-                return BadRequest(
-                    "ManagerPoints is required when delay is justified.");
-            }
-
-            if (dto.ManagerPoints.HasValue &&
-                (dto.ManagerPoints.Value < 0 ||
-                 dto.ManagerPoints.Value > 100))
-            {
-                return BadRequest(
-                    "ManagerPoints must be between 0 and 100.");
-            }
-
             var userIdClaim = User.FindFirst("UserId")?.Value;
 
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-                return Unauthorized("User ID not found in token.");
-
-            if (!int.TryParse(userIdClaim, out int reviewerId))
+            if (string.IsNullOrWhiteSpace(userIdClaim) ||
+                !int.TryParse(userIdClaim, out int reviewerId))
+            {
                 return Unauthorized("Invalid User ID in token.");
+            }
 
             var reviewer = await _context.Users
                 .FirstOrDefaultAsync(u => u.UserId == reviewerId);
@@ -1594,27 +1518,25 @@ namespace staff.Controllers
                 return BadRequest("Reviewer not found.");
 
             var task = await _context.Tasks
-                .FirstOrDefaultAsync(t =>
-                    t.TaskCode == dto.TaskCode);
+                .FirstOrDefaultAsync(t => t.TaskCode == dto.TaskCode);
 
             if (task == null)
                 return NotFound("Task not found.");
 
             if (!string.Equals(
-                    task.Status,
-                    "completed",
-                    StringComparison.OrdinalIgnoreCase))
+                task.Status,
+                "completed",
+                StringComparison.OrdinalIgnoreCase))
             {
-                return BadRequest(
-                    "Task is not completed yet.");
+                return BadRequest("Task is not completed yet.");
             }
 
+            // Find the staff member's task assignment
             var taskMember = await _context.TaskMembers
                 .FirstOrDefaultAsync(tm =>
                     tm.TaskCode == dto.TaskCode &&
                     tm.Assign_To != null &&
-                    tm.Assign_To.StartsWith(
-                        dto.StaffId.ToString() + "-"));
+                    tm.Assign_To.StartsWith(dto.StaffId.ToString() + "-"));
 
             if (taskMember == null)
             {
@@ -1622,6 +1544,7 @@ namespace staff.Controllers
                     "This staff member is not assigned to this task.");
             }
 
+            // Prevent duplicate reviews for this staff member and task
             var alreadyReviewed = await _context.TaskReview
                 .AnyAsync(r =>
                     r.TaskCode == dto.TaskCode &&
@@ -1633,42 +1556,50 @@ namespace staff.Controllers
                     "This task has already been reviewed for this staff member.");
             }
 
-            int systemPoints = CalculateTaskScore(
-     task.Due_Date,
-     task.Completed_Date,
-     task.Priority,
-     task.EndTime,
-     task.Created_At
- );
+            // Default quantities for a non-split task
+            int? assignedQuantity = task.Quantity;
+            int? completedQuantity = task.CompletedQuantity;
 
-            // System Points = maximum 90
+            // Use this member's own quantities for a split task
+            if (taskMember.SplitId.HasValue)
+            {
+                var split = await _context.TaskQuantitySplit
+                    .FirstOrDefaultAsync(s =>
+                        s.Id == taskMember.SplitId.Value &&
+                        s.TaskCode == task.TaskCode);
+
+                if (split != null)
+                {
+                    assignedQuantity = split.Quantity;
+                    completedQuantity = split.CompletedQuantity;
+                }
+            }
+
+            // Calculate system points separately
+            int systemPoints = CalculateTaskScore(
+                task.Due_Date,
+                task.Completed_Date,
+                task.Priority,
+                task.EndTime,
+                task.Created_At,
+                assignedQuantity,
+                completedQuantity
+            );
+
+            // System points maximum is 90
             systemPoints = Math.Clamp(systemPoints, 0, 90);
 
+            // Manager points are ALWAYS the final points
+            int finalPoints = dto.ManagerPoints.Value;
 
-            // Final Points
-            // Normally = System Points
-            // Justified delay = Manager Points (maximum 100)
-
-            int finalPoints = systemPoints;
-
-            if (dto.IsDelayJustified)
-            {
-                finalPoints = dto.ManagerPoints!.Value;
-
-                // Manager can give up to 100
-                finalPoints = Math.Clamp(finalPoints, 0, 100);
-            }
             var review = new TaskReview
             {
                 TaskCode = dto.TaskCode,
-
                 StaffId = dto.StaffId,
 
-                ReviewedById =
-                    $"{reviewer.UserId}-{reviewer.Name}",
+                ReviewedById = $"{reviewer.UserId}-{reviewer.Name}",
 
                 SystemPoints = systemPoints,
-
                 FinalPoints = finalPoints,
 
                 IsDelayJustified = dto.IsDelayJustified,
@@ -1685,112 +1616,85 @@ namespace staff.Controllers
             };
 
             _context.TaskReview.Add(review);
-
             await _context.SaveChangesAsync();
 
+            // Update goal points when all assigned staff have been reviewed
             if (!string.IsNullOrWhiteSpace(task.GoalCode))
             {
                 var goal = await _context.Goal
-                    .FirstOrDefaultAsync(g =>
-                        g.GoalCode == task.GoalCode);
+                    .FirstOrDefaultAsync(g => g.GoalCode == task.GoalCode);
 
                 if (goal != null)
                 {
-
                     var goalTasks = await _context.Tasks
-                        .Where(t =>
-                            t.GoalCode == goal.GoalCode)
+                        .Where(t => t.GoalCode == goal.GoalCode)
                         .ToListAsync();
 
                     var goalTaskCodes = goalTasks
                         .Select(t => t.TaskCode)
-                        .Where(code => !string.IsNullOrWhiteSpace(code))
                         .ToList();
 
-                    var reviews = await _context.TaskReview
-                        .Where(r =>
-                            r.TaskCode != null &&
-                            goalTaskCodes.Contains(r.TaskCode))
+                    var goalReviews = await _context.TaskReview
+                        .Where(r => goalTaskCodes.Contains(r.TaskCode!))
                         .ToListAsync();
 
-                    bool allTasksReviewed = true;
+                    var goalMembers = await _context.TaskMembers
+                        .Where(tm => goalTaskCodes.Contains(tm.TaskCode))
+                        .ToListAsync();
 
-                    foreach (var goalTask in goalTasks)
+                    bool allReviewed = true;
+
+                    foreach (var member in goalMembers)
                     {
-                        var members = await _context.TaskMembers
-                            .Where(tm =>
-                                tm.TaskCode == goalTask.TaskCode)
-                            .ToListAsync();
+                        if (string.IsNullOrWhiteSpace(member.Assign_To))
+                            continue;
 
-                        foreach (var member in members)
+                        var parts = member.Assign_To.Split(
+                            '-',
+                            StringSplitOptions.RemoveEmptyEntries);
+
+                        if (parts.Length == 0 ||
+                            !int.TryParse(parts[0].Trim(), out int memberStaffId))
                         {
-                            if (string.IsNullOrWhiteSpace(
-                                member.Assign_To))
-                            {
-                                continue;
-                            }
-                            var parts = member.Assign_To
-                                .Split('-', 3);
-
-                            if (parts.Length == 0)
-                                continue;
-
-
-                            if (!int.TryParse(
-                                parts[0],
-                                out int memberStaffId))
-                            {
-                                continue;
-                            }
-
-                            bool reviewed = reviews.Any(r =>
-                                r.TaskCode == goalTask.TaskCode &&
-                                r.StaffId == memberStaffId);
-
-                            if (!reviewed)
-                            {
-                                allTasksReviewed = false;
-                                break;
-                            }
+                            continue;
                         }
 
-                        if (!allTasksReviewed)
+                        bool reviewed = goalReviews.Any(r =>
+                            r.TaskCode == member.TaskCode &&
+                            r.StaffId == memberStaffId);
+
+                        if (!reviewed)
+                        {
+                            allReviewed = false;
                             break;
+                        }
                     }
 
-
-                    if (allTasksReviewed)
+                    if (allReviewed)
                     {
                         var taskAveragePoints = new List<int>();
 
-
                         foreach (var goalTask in goalTasks)
                         {
-                            var taskReviews = reviews
-                                .Where(r =>
-                                    r.TaskCode == goalTask.TaskCode)
+                            var taskReviews = goalReviews
+                                .Where(r => r.TaskCode == goalTask.TaskCode)
                                 .ToList();
-
 
                             if (taskReviews.Count == 0)
                                 continue;
 
-                            double taskAverage = taskReviews
-                                .Average(r => r.FinalPoints);
+                            int average = (int)Math.Round(
+                                taskReviews.Average(r => r.FinalPoints));
 
-
-                            taskAveragePoints.Add(
-                                (int)Math.Round(taskAverage));
+                            taskAveragePoints.Add(average);
                         }
-
 
                         if (taskAveragePoints.Count > 0)
                         {
                             goal.Goalpoints = CalculateGoalPoints(
                                 taskAveragePoints,
                                 goal.Priority,
-                                goal.DueDate
-                            );
+                                goal.DueDate);
 
                             await _context.SaveChangesAsync();
                         }
@@ -1801,23 +1705,16 @@ namespace staff.Controllers
             return Ok(new
             {
                 message = "Review submitted successfully.",
-
                 taskCode = dto.TaskCode,
-
                 staffId = dto.StaffId,
-
                 systemPoints = systemPoints,
-
+                managerPoints = dto.ManagerPoints.Value,
                 finalPoints = finalPoints,
-
                 isDelayJustified = dto.IsDelayJustified,
-
                 delayReason = dto.IsDelayJustified
-                    ? dto.DelayReason
+                    ? dto.DelayReason?.Trim()
                     : null,
-
-                comment = dto.Comment,
-
+                comment = review.Comment,
                 reviewedBy = $"{reviewer.UserId}-{reviewer.Name}"
             });
         }
@@ -1827,556 +1724,277 @@ namespace staff.Controllers
         [HttpGet("completed-task")]
         public async Task<IActionResult> GetCompletedTaskPoints()
         {
-            // =====================================================
-            // 1. GET LOGGED-IN USER
-            // =====================================================
-
-            var userIdClaim = User.FindFirst("UserId")?.Value;
-
-            if (string.IsNullOrWhiteSpace(userIdClaim))
-                return Unauthorized("Invalid token");
-
-            if (!int.TryParse(userIdClaim, out int loggedInUserId))
-                return Unauthorized("Invalid UserId in token");
-
-
-            // =====================================================
-            // 2. GET LOGGED-IN USER
-            // =====================================================
-
-            var loggedInUser = await _context.Users
-                .FirstOrDefaultAsync(u => u.UserId == loggedInUserId);
-
-            if (loggedInUser == null)
-                return NotFound("User not found");
-
-
-            string loggedInRole = loggedInUser.Role?.Trim() ?? "";
-
-
-            // =====================================================
-            // 3. GET ALL DEPARTMENTS
-            // =====================================================
-
-            var departments = await _context.Departments
-                .ToListAsync();
-
-
-            // =====================================================
-            // 4. GET DEPARTMENT ACCESS
-            //
-            // DepartmentAccess:
-            //
-            // UserId           = Division Head UserId
-            // RoleId           = Division Head Role
-            // HeadDepartmentId = Head department
-            // SubDepartmentId  = Division/sub-department
-            // =====================================================
-
-            var departmentAccess = await _context.DepartmentAccess
-                .ToListAsync();
-
-
-            // =====================================================
-            // 5. GET ALL USERS
-            // =====================================================
-
-            var allUsers = await _context.Users
-                .ToListAsync();
-
-
-            // =====================================================
-            // 6. DETERMINE ALLOWED STAFF
-            // =====================================================
-
-            var allowedUserIds = new HashSet<int>();
-
-
-            // =====================================================
-            // DIRECTOR
-            //
-            // Director can see:
-            //
-            // 1. Division Head's division tasks
-            // 2. Managers who do NOT belong to a Division Head
-            //
-            // Managers already belonging to a Division Head
-            // are not separately shown as standalone managers.
-            // =====================================================
-
-            if (loggedInRole == "1")
+            try
             {
-                // -------------------------------------------------
-                // 6A. GET ALL DIVISION HEADS
-                // -------------------------------------------------
+                var userIdClaim = User.FindFirst("UserId")?.Value;
 
-                var divisionHeadIds = departmentAccess
-                    .Where(x => x.RoleId == 2)
-                    .Select(x => x.UserId)
-                    .Distinct()
-                    .ToHashSet();
+                if (!int.TryParse(userIdClaim, out int loggedInUserId))
+                    return Unauthorized("Invalid UserId in token.");
 
+                var loggedInUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.UserId == loggedInUserId);
 
-                // -------------------------------------------------
-                // 6B. GET ALL SUB-DEPARTMENTS BELONGING
-                //     TO DIVISION HEADS
-                // -------------------------------------------------
+                if (loggedInUser == null)
+                    return NotFound("User not found.");
 
-                var divisionSubDepartmentIds = departmentAccess
-                    .Where(x =>
-                        x.RoleId == 2 &&
-                        divisionHeadIds.Contains(x.UserId))
-                    .Select(x => x.SubDepartmentId)
-                    .Distinct()
-                    .ToHashSet();
+                var roles = await _context.Roles.ToListAsync();
 
+                var directorRole = roles.FirstOrDefault(r => r.Position == 1);
+                var divisionHeadRole = roles.FirstOrDefault(r => r.Position == 2);
+                var managerRole = roles.FirstOrDefault(r => r.Position == 3);
 
-                // -------------------------------------------------
-                // 6C. CONVERT SUB-DEPARTMENT IDS TO DEPARTMENT NAMES
-                // -------------------------------------------------
-
-                var divisionDepartmentNames = departments
-                    .Where(d =>
-                        divisionSubDepartmentIds.Contains(d.Id))
-                    .Select(d => d.DepartmentName)
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-
-                // -------------------------------------------------
-                // 6D. ADD DIVISION HEADS THEMSELVES
-                // -------------------------------------------------
-
-                foreach (var divisionHeadId in divisionHeadIds)
+                if (directorRole == null ||
+                    divisionHeadRole == null ||
+                    managerRole == null)
                 {
-                    allowedUserIds.Add(divisionHeadId);
+                    return BadRequest(
+                        "Director, Division Head, or Manager role is not configured.");
                 }
 
+                string directorRoleId = directorRole.Position.ToString();
+                string divisionHeadRoleId = divisionHeadRole.Position.ToString();
+                string managerRoleId = managerRole.Position.ToString();
 
-                // -------------------------------------------------
-                // 6E. ADD USERS BELONGING TO DIVISION DEPARTMENTS
-                // -------------------------------------------------
+                string loggedInRole = loggedInUser.Role?.Trim() ?? "";
 
-                foreach (var user in allUsers)
+                var allUsers = await _context.Users.ToListAsync();
+                var departments = await _context.Departments.ToListAsync();
+                var departmentAccess = await _context.DepartmentAccess.ToListAsync();
+
+                var allowedUserIds = new HashSet<int>();
+
+                // =====================================================
+                // POSITION 1: DIRECTOR
+                // Division Heads + standalone Managers only.
+                // Exclude Managers under any Division Head.
+                // =====================================================
+                if (loggedInRole == directorRoleId)
                 {
-                    if (string.IsNullOrWhiteSpace(user.Department))
-                        continue;
+                    var divisionHeadIds = allUsers
+                        .Where(u => u.Role?.Trim() == divisionHeadRoleId)
+                        .Select(u => u.UserId)
+                        .ToHashSet();
 
-                    if (divisionDepartmentNames.Contains(
-                            user.Department.Trim()))
-                    {
-                        allowedUserIds.Add(user.UserId);
-                    }
+                    // Include Division Heads themselves.
+                    allowedUserIds.UnionWith(divisionHeadIds);
+
+                    // Departments assigned to any Division Head.
+                    var divisionDepartmentIds = departmentAccess
+                        .Where(a =>
+                            divisionHeadIds.Contains(a.UserId) &&
+                            a.SubDepartmentId > 0)
+                        .Select(a => a.SubDepartmentId)
+                        .ToHashSet();
+
+                    var divisionDepartmentNames = departments
+                        .Where(d => divisionDepartmentIds.Contains(d.Id))
+                        .Select(d => d.DepartmentName?.Trim())
+                        .Where(n => !string.IsNullOrWhiteSpace(n))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    // Only Managers whose departments are NOT assigned
+                    // to a Division Head.
+                    var standaloneManagers = allUsers.Where(u =>
+                        u.Role?.Trim() == managerRoleId &&
+                        !string.IsNullOrWhiteSpace(u.Department) &&
+                        !divisionDepartmentNames.Contains(u.Department.Trim()));
+
+                    allowedUserIds.UnionWith(
+                        standaloneManagers.Select(u => u.UserId));
                 }
 
-
-                // -------------------------------------------------
-                // 6F. GET MANAGERS WHO DO NOT BELONG
-                //     TO ANY DIVISION HEAD
-                // -------------------------------------------------
-
-                var allDivisionSubDepartmentIds =
-                    departmentAccess
-                        .Where(x =>
-                            x.RoleId == 2 &&
-                            x.SubDepartmentId > 0)
-                        .Select(x => x.SubDepartmentId)
+                // =====================================================
+                // POSITION 2: DIVISION HEAD
+                // Users belonging to departments assigned to this
+                // Division Head through DepartmentAccess.
+                // =====================================================
+                else if (loggedInRole == divisionHeadRoleId)
+                {
+                    var myDepartmentIds = departmentAccess
+                        .Where(a =>
+                            a.UserId == loggedInUserId &&
+                            a.SubDepartmentId > 0)
+                        .Select(a => a.SubDepartmentId)
                         .Distinct()
                         .ToHashSet();
 
+                    var myDepartmentNames = departments
+                        .Where(d => myDepartmentIds.Contains(d.Id))
+                        .Select(d => d.DepartmentName?.Trim())
+                        .Where(n => !string.IsNullOrWhiteSpace(n))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-                var standaloneManagers = allUsers
-                    .Where(u =>
-                        u.Role == "3" &&
-                        !string.IsNullOrWhiteSpace(u.Department))
-                    .Where(manager =>
-                    {
-                        // Find manager's department
-                        var managerDepartment =
-                            departments.FirstOrDefault(d =>
-                                !string.IsNullOrWhiteSpace(d.DepartmentName) &&
-                                d.DepartmentName.Trim()
-                                    .Equals(
-                                        manager.Department.Trim(),
-                                        StringComparison.OrdinalIgnoreCase));
+                    var departmentUsers = allUsers.Where(u =>
+                        u.UserId != loggedInUserId &&
+                        !string.IsNullOrWhiteSpace(u.Department) &&
+                        myDepartmentNames.Contains(u.Department.Trim()));
 
-                        if (managerDepartment == null)
-                            return true;
+                    allowedUserIds.UnionWith(
+                        departmentUsers.Select(u => u.UserId));
+                }
 
-                        // If this department is NOT mapped
-                        // to a Division Head, manager is standalone.
-                        return !allDivisionSubDepartmentIds.Contains(
-                            managerDepartment.Id);
-                    })
-                    .ToList();
-
-
-                // -------------------------------------------------
-                // 6G. ADD STANDALONE MANAGER + THEIR DEPARTMENT
-                // -------------------------------------------------
-
-                foreach (var manager in standaloneManagers)
+                // =====================================================
+                // POSITION 3: MANAGER
+                // All other users in the Manager's department.
+                // =====================================================
+                else if (loggedInRole == managerRoleId)
                 {
-                    allowedUserIds.Add(manager.UserId);
+                    var departmentUsers = allUsers.Where(u =>
+                        u.UserId != loggedInUserId &&
+                        !string.IsNullOrWhiteSpace(loggedInUser.Department) &&
+                        !string.IsNullOrWhiteSpace(u.Department) &&
+                        string.Equals(
+                            u.Department.Trim(),
+                            loggedInUser.Department.Trim(),
+                            StringComparison.OrdinalIgnoreCase));
 
-                    // Also include staff belonging to this manager's
-                    // own department.
-                    foreach (var staff in allUsers)
+                    allowedUserIds.UnionWith(
+                        departmentUsers.Select(u => u.UserId));
+                }
+                else
+                {
+                    return Forbid();
+                }
+
+                // =====================================================
+                // GET COMPLETED TASKS
+                // =====================================================
+                var tasks = await _context.Tasks
+                    .Where(t =>
+                        t.Status != null &&
+                        t.Status.ToLower() == "completed")
+                    .OrderByDescending(t => t.Completed_Date)
+                    .ToListAsync();
+
+                var taskMembers = await _context.TaskMembers.ToListAsync();
+                var taskQuantitySplits =
+                    await _context.TaskQuantitySplit.ToListAsync();
+                var reviews = await _context.TaskReview.ToListAsync();
+
+                var result = new List<object>();
+
+                foreach (var task in tasks)
+                {
+                    var members = taskMembers
+                        .Where(tm => tm.TaskCode == task.TaskCode)
+                        .ToList();
+
+                    foreach (var member in members)
                     {
-                        if (string.IsNullOrWhiteSpace(staff.Department))
+                        if (string.IsNullOrWhiteSpace(member.Assign_To))
                             continue;
 
-                        if (staff.Department.Trim().Equals(
-                                manager.Department.Trim(),
-                                StringComparison.OrdinalIgnoreCase))
+                        var parts = member.Assign_To.Split(
+                            '-',
+                            StringSplitOptions.RemoveEmptyEntries);
+
+                        if (parts.Length == 0 ||
+                            !int.TryParse(parts[0].Trim(), out int staffId))
                         {
-                            allowedUserIds.Add(staff.UserId);
+                            continue;
                         }
-                    }
-                }
-            }
 
-
-            // =====================================================
-            // DIVISION HEAD
-            //
-            // Division Head can see completed tasks belonging
-            // to departments assigned to that Division Head.
-            // =====================================================
-
-            else if (loggedInRole == "2")
-            {
-                // -------------------------------------------------
-                // GET SUB-DEPARTMENTS ASSIGNED TO THIS
-                // DIVISION HEAD
-                // -------------------------------------------------
-
-                var mySubDepartmentIds = departmentAccess
-                    .Where(x =>
-                        x.UserId == loggedInUserId &&
-                        x.RoleId == 2)
-                    .Select(x => x.SubDepartmentId)
-                    .Distinct()
-                    .ToHashSet();
-
-
-                // -------------------------------------------------
-                // GET DEPARTMENT NAMES
-                // -------------------------------------------------
-
-                var myDepartmentNames = departments
-                    .Where(d =>
-                        mySubDepartmentIds.Contains(d.Id))
-                    .Select(d => d.DepartmentName)
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-
-                // -------------------------------------------------
-                // ADD USERS BELONGING TO THIS DIVISION
-                // -------------------------------------------------
-
-                foreach (var user in allUsers)
-                {
-                    if (string.IsNullOrWhiteSpace(user.Department))
-                        continue;
-
-                    if (myDepartmentNames.Contains(
-                            user.Department.Trim()))
-                    {
-                        allowedUserIds.Add(user.UserId);
-                    }
-                }
-
-
-                // -------------------------------------------------
-                // INCLUDE DIVISION HEAD HIMSELF
-                // -------------------------------------------------
-
-                allowedUserIds.Add(loggedInUserId);
-            }
-
-
-            // =====================================================
-            // NORMAL MANAGER
-            //
-            // Manager can see completed tasks from their
-            // own department.
-            //
-            // If that manager belongs to a Division Head,
-            // the manager still sees only their own department
-            // when logged in directly.
-            // =====================================================
-
-            else if (loggedInRole == "3")
-            {
-                foreach (var user in allUsers)
-                {
-                    if (string.IsNullOrWhiteSpace(user.Department))
-                        continue;
-
-                    if (user.Department.Trim().Equals(
-                            loggedInUser.Department?.Trim(),
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        allowedUserIds.Add(user.UserId);
-                    }
-                }
-            }
-
-
-            // =====================================================
-            // OTHER ROLES
-            // =====================================================
-
-            else
-            {
-                return Forbid();
-            }
-
-
-            // =====================================================
-            // 7. GET COMPLETED TASKS
-            // =====================================================
-
-            var tasks = await _context.Tasks
-                .Where(t =>
-                    t.Status != null &&
-                    t.Status.ToLower() == "completed")
-                .OrderByDescending(t => t.Completed_Date)
-                .ToListAsync();
-
-
-            // =====================================================
-            // 8. GET TASK MEMBERS
-            // =====================================================
-
-            var taskMembers = await _context.TaskMembers
-                .ToListAsync();
-
-
-            // =====================================================
-            // 9. GET REVIEWS
-            // =====================================================
-
-            var reviews = await _context.TaskReview
-                .ToListAsync();
-
-
-            // =====================================================
-            // 10. BUILD RESULT
-            // =====================================================
-
-            var result = new List<object>();
-
-
-            foreach (var task in tasks)
-            {
-                // -------------------------------------------------
-                // GET MEMBERS FOR TASK
-                // -------------------------------------------------
-
-                var members = taskMembers
-                    .Where(tm =>
-                        tm.TaskCode == task.TaskCode)
-                    .ToList();
-
-
-                foreach (var member in members)
-                {
-                    // -------------------------------------------------
-                    // VALIDATE ASSIGNED USER
-                    // -------------------------------------------------
-
-                    if (string.IsNullOrWhiteSpace(member.Assign_To))
-                        continue;
-
-
-                    var parts = member.Assign_To.Split(
-                        '-',
-                        StringSplitOptions.RemoveEmptyEntries);
-
-
-                    if (parts.Length == 0)
-                        continue;
-
-
-                    if (!int.TryParse(
-                            parts[0].Trim(),
-                            out int staffId))
-                    {
-                        continue;
-                    }
-
-
-                    // -------------------------------------------------
-                    // ACCESS CHECK
-                    // -------------------------------------------------
-
-                    if (!allowedUserIds.Contains(staffId))
-                        continue;
-
-
-                    // -------------------------------------------------
-                    // GET STAFF USER
-                    // -------------------------------------------------
-
-                    var user = allUsers.FirstOrDefault(
-                        u => u.UserId == staffId);
-
-
-                    if (user == null)
-                        continue;
-
-
-                    // -------------------------------------------------
-                    // GET REVIEW FOR THIS STAFF
-                    // -------------------------------------------------
-
-                    var review = reviews.FirstOrDefault(r =>
-                        r.TaskCode == task.TaskCode &&
-                        r.StaffId == staffId);
-
-
-                    // -------------------------------------------------
-                    // CALCULATE SYSTEM POINTS
-                    //
-                    // Quantity is included:
-                    //
-                    // Target 30
-                    // Completed 25
-                    //
-                    // Normal score 90
-                    //
-                    // 90 * (25 / 30)
-                    // = 75
-                    // -------------------------------------------------
-
-                    int systemPoints = CalculateTaskScore(
-                        task.Due_Date,
-                        task.Completed_Date,
-                        task.Priority,
-                        task.EndTime,
-                        task.Created_At,
-                        task.Quantity,
-                        task.CompletedQuantity
-                    );
-
-
-                    // -------------------------------------------------
-                    // ADD RESULT
-                    // -------------------------------------------------
-
-                    result.Add(new
-                    {
-                        taskCode = task.TaskCode,
-
-                        task = task.Task,
-
-                        description = task.Description,
-
-                        priority = task.Priority,
-
-                        status = task.Status,
-
-                        createdAt = task.Created_At,
-
-                        dueDate = task.Due_Date,
-
-                        completedDate =
-                            task.Completed_Date == default(DateTime)
-                                ? (DateTime?)null
-                                : task.Completed_Date,
-
-
-                        // =============================================
-                        // STAFF
-                        // =============================================
-
-                        staffId = user.UserId,
-
-                        staffName = user.Name,
-
-                        staffEmail = user.Email,
-
-                        staffDepartment = user.Department,
-
-                        staffRole = user.Role,
-
-
-                        // =============================================
-                        // ASSIGNMENT
-                        // =============================================
-
-                        totalMembers = task.Members,
-
-                        assignedTo = member.Assign_To,
-
-                        taskMemberCode = member.TMCode,
-
-                        userStatus = member.UserStatus,
-
-                        splitId = member.SplitId,
-
-
-                        // =============================================
-                        // QUANTITY
-                        // =============================================
-
-                        quantity = task.Quantity,
-
-                        completedQuantity =
-                            task.CompletedQuantity,
-
-                        pendingQuantity =
-                            task.Quantity.HasValue
+                        // Return only tasks belonging to permitted users.
+                        if (!allowedUserIds.Contains(staffId))
+                            continue;
+
+                        var user = allUsers.FirstOrDefault(
+                            u => u.UserId == staffId);
+
+                        if (user == null)
+                            continue;
+
+                        var review = reviews.FirstOrDefault(r =>
+                            r.TaskCode == task.TaskCode &&
+                            r.StaffId == staffId);
+
+                        int? assignedQuantity = task.Quantity;
+                        int? memberCompletedQuantity = task.CompletedQuantity;
+
+                        // Use the member's quantities for split tasks.
+                        if (member.SplitId.HasValue)
+                        {
+                            var split = taskQuantitySplits.FirstOrDefault(s =>
+                                s.Id == member.SplitId.Value &&
+                                s.TaskCode == task.TaskCode);
+
+                            if (split != null)
+                            {
+                                assignedQuantity = split.Quantity;
+                                memberCompletedQuantity = split.CompletedQuantity;
+                            }
+                        }
+
+                        int systemPoints = CalculateTaskScore(
+                            task.Due_Date,
+                            task.Completed_Date,
+                            task.Priority,
+                            task.EndTime,
+                            task.Created_At,
+                            assignedQuantity,
+                            memberCompletedQuantity);
+
+                        result.Add(new
+                        {
+                            taskCode = task.TaskCode,
+                            task = task.Task,
+                            description = task.Description,
+                            priority = task.Priority,
+                            status = task.Status,
+
+                            createdAt = task.Created_At,
+                            dueDate = task.Due_Date,
+
+                            completedDate =
+                                task.Completed_Date == default(DateTime)
+                                    ? (DateTime?)null
+                                    : task.Completed_Date,
+
+                            staffId = user.UserId,
+                            staffName = user.Name,
+                            staffEmail = user.Email,
+                            staffDepartment = user.Department,
+                            staffRole = user.Role,
+
+                            totalMembers = task.Members,
+                            assignedTo = member.Assign_To,
+                            taskMemberCode = member.TMCode,
+                            userStatus = member.UserStatus,
+                            splitId = member.SplitId,
+
+                            quantity = assignedQuantity,
+                            completedQuantity = memberCompletedQuantity,
+
+                            pendingQuantity = assignedQuantity.HasValue
                                 ? Math.Max(
                                     0,
-                                    task.Quantity.Value -
-                                    (task.CompletedQuantity ?? 0))
+                                    assignedQuantity.Value -
+                                    (memberCompletedQuantity ?? 0))
                                 : (int?)null,
 
+                            performanceType = task.PerformanceType,
+                            systemPoints = systemPoints,
 
-                        // =============================================
-                        // PERFORMANCE
-                        // =============================================
-
-                        performanceType =
-                            task.PerformanceType,
-
-                        systemPoints = systemPoints,
-
-
-                        // =============================================
-                        // REVIEW
-                        // =============================================
-
-                        reviewed = review != null,
-
-                        finalPoints =
-                            review?.FinalPoints,
-
-                        isDelayJustified =
-                            review?.IsDelayJustified ?? false,
-
-                        delayReason =
-                            review?.DelayReason,
-
-                        comment =
-                            review?.Comment,
-
-                        reviewedAt =
-                            review?.ReviewedAt
-                    });
+                            reviewed = review != null,
+                            finalPoints = review?.FinalPoints,
+                            isDelayJustified = review?.IsDelayJustified ?? false,
+                            delayReason = review?.DelayReason,
+                            comment = review?.Comment,
+                            reviewedAt = review?.ReviewedAt
+                        });
+                    }
                 }
+
+                return Ok(result);
             }
-
-
-            // =====================================================
-            // 11. RETURN
-            // =====================================================
-
-            return Ok(result);
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Failed to retrieve completed tasks.",
+                    error = ex.Message
+                });
+            }
         }
 
 
@@ -4651,227 +4269,6 @@ namespace staff.Controllers
         }
 
 
-        //[Authorize]
-        //[HttpGet("department-attitude-behaviour-scores")]
-        //public async Task<IActionResult> GetDepartmentAttitudeBehaviourScores()
-        //{
-        //    try
-        //    {
-        //        // Get logged-in user ID from JWT
-        //        var userIdClaim = User.FindFirst("UserId");
-
-        //        if (userIdClaim == null)
-        //            return Unauthorized("User ID not found in token.");
-
-        //        if (!int.TryParse(userIdClaim.Value, out int userId))
-        //            return Unauthorized("Invalid User ID.");
-
-        //        // Get logged-in user
-        //        var loggedInUser = await _context.Users
-        //            .FirstOrDefaultAsync(u => u.UserId == userId);
-
-        //        if (loggedInUser == null)
-        //            return NotFound("Logged-in user not found.");
-
-        //        if (string.IsNullOrWhiteSpace(loggedInUser.Department))
-        //            return BadRequest("User department not found.");
-
-        //        // Get scores of users in the same department
-        //        var scores = await (
-        //            from score in _context.AttitudeBehaviourScore
-        //            join user in _context.Users
-        //                on score.StaffId equals user.UserId
-        //            where user.Department == loggedInUser.Department
-        //            orderby user.Name
-        //            select new
-        //            {
-        //                score.Id,
-        //                StaffId = user.UserId,
-        //                StaffName = user.Name,
-        //                Department = user.Department,
-
-        //                score.Communication,
-        //                score.Punctuality,
-        //                score.Integrity,
-        //                score.Total,
-        //                score.Date
-        //            }
-        //        ).ToListAsync();
-
-        //        return Ok(new
-        //        {
-        //            department = loggedInUser.Department,
-        //            count = scores.Count,
-        //            scores = scores
-        //        });
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return StatusCode(
-        //            500,
-        //            new
-        //            {
-        //                message = "Error while getting department attitude & behaviour scores.",
-        //                error = ex.Message
-        //            }
-        //        );
-        //    }
-        //}
-
-
-        //..............................................................................................
-
-
-
-
-        //[Authorize]
-        //[HttpGet("department-attitude-behaviour-scores")]
-        //public async Task<IActionResult> GetDepartmentAttitudeBehaviourScores()
-        //{
-        //    try
-        //    {
-        //        // =========================================================
-        //        // 1. GET LOGGED-IN USER
-        //        // =========================================================
-
-        //        var userIdClaim = User.FindFirst("UserId");
-
-        //        if (userIdClaim == null)
-        //            return Unauthorized("User ID not found in token.");
-
-        //        if (!int.TryParse(userIdClaim.Value, out int userId))
-        //            return Unauthorized("Invalid User ID.");
-
-        //        var loggedInUser = await _context.Users
-        //            .FirstOrDefaultAsync(u => u.UserId == userId);
-
-        //        if (loggedInUser == null)
-        //            return NotFound("Logged-in user not found.");
-
-        //        var role = loggedInUser.Role;
-
-        //        // =========================================================
-        //        // 2. DIRECTOR
-        //        // Role 1 = Director
-        //        // See ALL Division Heads + Managers
-        //        // =========================================================
-
-        //        IQueryable<User> usersQuery = _context.Users;
-
-        //        if (role == "1")
-        //        {
-        //            // Director can see:
-        //            // Role 2 = Division Head
-        //            // Role 3 = Manager
-
-        //            usersQuery = usersQuery
-        //                .Where(u => u.Role == "2" || u.Role == "3");
-        //        }
-
-        //        // =========================================================
-        //        // 3. DIVISION HEAD
-        //        // Role 2
-        //        // See Managers in same department
-        //        // =========================================================
-
-        //        else if (role == "2")
-        //        {
-        //            if (string.IsNullOrWhiteSpace(loggedInUser.Department))
-        //                return BadRequest("User department not found.");
-
-        //            usersQuery = usersQuery
-        //                .Where(u =>
-        //                    u.Department == loggedInUser.Department &&
-        //                    u.Role == "3");
-        //        }
-
-        //        // =========================================================
-        //        // 4. MANAGER
-        //        // Role 3
-        //        // See users in same department
-        //        // =========================================================
-
-        //        else if (role == "3")
-        //        {
-        //            if (string.IsNullOrWhiteSpace(loggedInUser.Department))
-        //                return BadRequest("User department not found.");
-
-        //            usersQuery = usersQuery
-        //                .Where(u =>
-        //                    u.Department == loggedInUser.Department);
-        //        }
-
-        //        // =========================================================
-        //        // 5. OTHER ROLES
-        //        // =========================================================
-
-        //        else
-        //        {
-        //            return Forbid();
-        //        }
-
-        //        // =========================================================
-        //        // 6. GET ATTITUDE & BEHAVIOUR SCORES
-        //        // =========================================================
-
-        //        var scores = await (
-        //            from score in _context.AttitudeBehaviourScore
-        //            join user in usersQuery
-        //                on score.StaffId equals user.UserId
-
-        //            orderby user.Name, score.Date descending
-
-        //            select new
-        //            {
-        //                score.Id,
-
-        //                StaffId = user.UserId,
-        //                StaffName = user.Name,
-
-        //                Department = user.Department,
-        //                Role = user.Role,
-
-        //                Communication = score.Communication,
-        //                Punctuality = score.Punctuality,
-        //                Integrity = score.Integrity,
-        //                Total = score.Total,
-
-        //                Date = score.Date
-        //            }
-        //        ).ToListAsync();
-
-        //        // =========================================================
-        //        // 7. RESPONSE
-        //        // =========================================================
-
-        //        return Ok(new
-        //        {
-        //            requestedBy = new
-        //            {
-        //                userId = loggedInUser.UserId,
-        //                name = loggedInUser.Name,
-        //                role = loggedInUser.Role,
-        //                department = loggedInUser.Department
-        //            },
-
-        //            count = scores.Count,
-
-        //            scores = scores
-        //        });
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return StatusCode(
-        //            500,
-        //            new
-        //            {
-        //                message = "Error while getting department attitude & behaviour scores.",
-        //                error = ex.Message
-        //            }
-        //        );
-        //    }
-        //}
-
 
         [Authorize]
        [HttpPost("create_overtime")]
@@ -5319,54 +4716,28 @@ namespace staff.Controllers
                 });
             }
         }
-      
-       [Authorize]
-       [HttpGet("department-extra-work")]
-       public async Task<IActionResult> GetDepartmentExtraWork()
+
+
+        [Authorize]
+        [HttpGet("department-extra-work")]
+        public async Task<IActionResult> GetDepartmentExtraWork()
         {
             try
             {
-                // 1. Get authorized user ID from JWT
-                var userIdClaim = User.FindFirst("UserId");
+                // 1. Get logged-in user's ID from JWT
+                var userIdClaim = User.FindFirst("UserId")?.Value;
 
-                if (userIdClaim == null)
-                    return Unauthorized("User ID not found in token.");
-
-                if (!int.TryParse(userIdClaim.Value, out int userId))
-                    return Unauthorized("Invalid User ID.");
-
-                // 2. Get logged-in user
-                var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.UserId == userId);
-
-                if (user == null)
+                if (!int.TryParse(userIdClaim, out int userId))
                 {
-                    return NotFound(new
+                    return Unauthorized(new
                     {
-                        message = "User not found."
+                        message = "Invalid or missing User ID in token."
                     });
                 }
 
-                // 3. Get manager department
-                var department = user.Department;
-
-                if (string.IsNullOrWhiteSpace(department))
-                {
-                    return BadRequest(new
-                    {
-                        message = "Manager department not found."
-                    });
-                }
-
-                // 4. Get all staff in manager's department
-                var staffIds = await _context.Users
-                    .Where(u => u.Department == department)
-                    .Select(u => u.UserId)
-                    .ToListAsync();
-
-                // 5. Get all ExtraWork belonging to those staff
+                // 2. Get extra work created/managed by this logged-in manager only
                 var extraWorks = await _context.ExtraWork
-                    .Where(e => staffIds.Contains(e.StaffId))
+                    .Where(e => e.ManagerId == userId)
                     .OrderByDescending(e => e.WorkDate)
                     .ThenByDescending(e => e.Id)
                     .Select(e => new
@@ -5375,10 +4746,8 @@ namespace staff.Controllers
                         e.ManagerId,
                         e.StaffId,
 
-                        // Original TaskId
                         e.TaskId,
 
-                        // Get Task Name from Task table
                         TaskName = _context.Tasks
                             .Where(t => t.TaskCode == e.TaskId)
                             .Select(t => t.Task)
@@ -5396,13 +4765,11 @@ namespace staff.Controllers
                         e.VerifiedBy,
                         e.IsCompensationUsed,
 
-                        // Staff name
                         StaffName = _context.Users
                             .Where(u => u.UserId == e.StaffId)
                             .Select(u => u.Name)
                             .FirstOrDefault(),
 
-                        // Manager name
                         ManagerName = _context.Users
                             .Where(u => u.UserId == e.ManagerId)
                             .Select(u => u.Name)
@@ -5410,9 +4777,9 @@ namespace staff.Controllers
                     })
                     .ToListAsync();
 
+                // 3. Return result
                 return Ok(new
                 {
-                    department,
                     count = extraWorks.Count,
                     extraWorks
                 });
@@ -5426,7 +4793,6 @@ namespace staff.Controllers
                 });
             }
         }
-
 
         [HttpGet("departments-extra-work")]
         public async Task<IActionResult> GetExtraWorkByDepartments(
@@ -5771,6 +5137,77 @@ namespace staff.Controllers
                 });
             }
         }
+
+
+        [HttpGet("hr-pending-expired-leaves")]
+        public async Task<IActionResult> GetHrPendingExpiredLeaves()
+        {
+            try
+            {
+                var today = DateTime.Today;
+
+                var leaves = await _context.LeaveForm
+                    .Where(x =>
+                        x.Status == "Pending" &&
+                        x.ToDate < today)
+                    .OrderBy(x => x.ToDate)
+                    .ToListAsync();
+
+                var senderIds = leaves
+                    .Select(x => x.SenderId)
+                    .Distinct()
+                    .ToList();
+
+                var users = await _context.Users
+                    .Where(u => senderIds.Contains(u.UserId))
+                    .ToDictionaryAsync(u => u.UserId);
+
+                var result = leaves.Select(leave =>
+                {
+                    users.TryGetValue(leave.SenderId, out var sender);
+
+                    return new
+                    {
+                        leave.Id,
+                        leave.SenderId,
+                        SenderName = sender?.Name ?? leave.Name,
+                        SenderDepartment = sender?.Department,
+                        leave.ReceiverId,
+                        leave.Designation,
+                        leave.Reason,
+                        leave.FromDate,
+                        leave.ToDate,
+                        leave.LeaveTyp,
+                        leave.LeaveType,
+                        leave.TotalDays,
+                        leave.ContactNumber,
+                        leave.Status,
+                        leave.SubmittedDate,
+                        leave.ApprovedDate,
+                        leave.RejectionReason,
+                        leave.CompensationExtraWorkId
+                    };
+                }).ToList();
+
+                return Ok(new
+                {
+                    message = "Pending expired leaves retrieved successfully.",
+                    count = result.Count,
+                    data = result
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new
+                {
+                    message = "Error retrieving pending expired leaves.",
+                    error = ex.Message
+                });
+            }
+        }
+
+
+
 
         //..............................................................................................
 

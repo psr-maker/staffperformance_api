@@ -622,10 +622,6 @@ namespace staff_work_tracking.Controllers
             if (model == null)
                 return BadRequest("Invalid data.");
 
-            // ============================================================
-            // 1. GET LOGGED-IN USER
-            // ============================================================
-
             var userIdClaim = User.FindFirst("UserId")?.Value;
 
             if (string.IsNullOrWhiteSpace(userIdClaim))
@@ -634,19 +630,40 @@ namespace staff_work_tracking.Controllers
             if (!int.TryParse(userIdClaim, out int creatorId))
                 return BadRequest("Invalid creator ID.");
 
-            // ============================================================
-            // 2. GET CREATOR
-            // ============================================================
-
             var creator = await _context.Users
                 .FirstOrDefaultAsync(u => u.UserId == creatorId);
 
             if (creator == null)
                 return BadRequest("Creator not found.");
+            //bool isDirector = creator.Role == "1";
 
-            // ============================================================
-            // 3. COMMON VALIDATION
-            // ============================================================
+
+            bool isDirector = creator.Role == "1";
+            bool isDivisionHead = creator.Role == "2";
+
+            var allowedDepartmentNames = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+
+            if (isDivisionHead)
+            {
+                var subDepartmentIds = await _context.DepartmentAccess
+                    .Where(x => x.UserId == creatorId && x.RoleId == 2)
+                    .Select(x => x.SubDepartmentId)
+                    .Distinct()
+                    .ToListAsync();
+
+                var names = await _context.Departments
+                    .Where(d => subDepartmentIds.Contains(d.Id))
+                    .Select(d => d.DepartmentName)
+                    .ToListAsync();
+
+                foreach (var name in names)
+                {
+                    if (!string.IsNullOrWhiteSpace(name))
+                        allowedDepartmentNames.Add(name.Trim());
+                }
+            }
+
 
             if (string.IsNullOrWhiteSpace(model.GoalType))
                 return BadRequest("GoalType is required.");
@@ -656,18 +673,75 @@ namespace staff_work_tracking.Controllers
 
             if (model.StartDate > model.DueDate)
                 return BadRequest("Start date cannot be after due date.");
-
+              
             var goalType = model.GoalType.Trim();
-
-            // ============================================================
-            // 4. CREATE YEARLY GOAL
-            // ============================================================
 
             if (goalType.Equals("Yearly", StringComparison.OrdinalIgnoreCase))
             {
-                // --------------------------------------------------------
-                // OPTIONAL YEARLY QUANTITY
-                // --------------------------------------------------------
+
+                // Validate yearly assignments only for yearly goals
+                if (model.YearlyAssignedUserIds == null ||
+                    model.YearlyAssignedUserIds.Count == 0)
+                {
+                    return BadRequest(
+                        "At least one user must be assigned to the yearly goal.");
+                }
+
+                var yearlyAssignedUserIds = model.YearlyAssignedUserIds
+                    .Distinct()
+                    .ToList();
+
+                // Validate that yearly-assigned users exist
+                var yearlyAssignedUsers = await _context.Users
+                    .Where(u => yearlyAssignedUserIds.Contains(u.UserId))
+                    .ToListAsync();
+
+                var missingYearlyUserIds = yearlyAssignedUserIds
+                    .Except(yearlyAssignedUsers.Select(u => u.UserId))
+                    .ToList();
+
+                if (missingYearlyUserIds.Any())
+                {
+                    return BadRequest(new
+                    {
+                        message = "One or more yearly assigned users were not found.",
+                        userIds = missingYearlyUserIds
+                    });
+                }
+
+                // Validate yearly users belong to the creator's department
+                //foreach (var user in yearlyAssignedUsers)
+                //{
+                //    if (!isDirector && !string.Equals(
+                //            user.Department,
+                //            creator.Department,
+                //            StringComparison.OrdinalIgnoreCase))
+                //    {
+                //        return BadRequest(
+                //            $"Yearly assigned user {user.UserId} does not belong to the creator's department.");
+                //    }
+                //}
+
+                foreach (var user in yearlyAssignedUsers)
+                {
+                    if (isDirector)
+                        continue;
+
+                    bool sameDepartment = string.Equals(
+                        user.Department?.Trim(),
+                        creator.Department?.Trim(),
+                        StringComparison.OrdinalIgnoreCase);
+
+                    bool belongsToDivision = isDivisionHead &&
+                        !string.IsNullOrWhiteSpace(user.Department) &&
+                        allowedDepartmentNames.Contains(user.Department.Trim());
+
+                    if (!sameDepartment && !belongsToDivision)
+                    {
+                        return BadRequest(
+                            $"User {user.UserId} does not belong to your permitted department.");
+                    }
+                }
 
                 if (model.TargetQuantity.HasValue &&
                     model.TargetQuantity.Value <= 0)
@@ -676,20 +750,12 @@ namespace staff_work_tracking.Controllers
                         "Yearly targetQuantity must be greater than 0 when quantity is provided.");
                 }
 
-                // --------------------------------------------------------
-                // MONTHLY GOALS REQUIRED
-                // --------------------------------------------------------
-
                 if (model.MonthlyGoals == null ||
                     model.MonthlyGoals.Count == 0)
                 {
                     return BadRequest(
                         "At least one monthly goal is required for a yearly goal.");
                 }
-
-                // --------------------------------------------------------
-                // VALIDATE MONTHLY QUANTITIES
-                // --------------------------------------------------------
 
                 long monthlyTargetTotal = 0;
 
@@ -728,21 +794,12 @@ namespace staff_work_tracking.Controllers
                     }
                 }
 
-                // --------------------------------------------------------
-                // CHECK MONTHLY TOTAL AGAINST YEARLY TOTAL
-                // ONLY WHEN YEARLY QUANTITY IS PROVIDED
-                // --------------------------------------------------------
-
                 if (model.TargetQuantity.HasValue &&
                     monthlyTargetTotal > model.TargetQuantity.Value)
                 {
                     return BadRequest(
                         $"Total monthly target quantity ({monthlyTargetTotal}) cannot be greater than yearly target quantity ({model.TargetQuantity.Value}).");
                 }
-
-                // --------------------------------------------------------
-                // GENERATE YEARLY GOAL CODE
-                // --------------------------------------------------------
 
                 var lastYearlyGoal = await _context.Goal
                     .Where(g => g.GoalType == "Yearly")
@@ -763,9 +820,7 @@ namespace staff_work_tracking.Controllers
                     }
                 }
 
-                // --------------------------------------------------------
-                // GENERATE MONTHLY GOAL START NUMBER
-                // --------------------------------------------------------
+        
 
                 var lastMonthlyGoal = await _context.Goal
                     .Where(g => g.GoalType == "Monthly")
@@ -786,9 +841,7 @@ namespace staff_work_tracking.Controllers
                     }
                 }
 
-                // --------------------------------------------------------
-                // GET ALL ASSIGNED USERS
-                // --------------------------------------------------------
+    
 
                 var allAssignedUserIds = model.MonthlyGoals
                     .SelectMany(m => m.AssignedUserIds ?? new List<int>())
@@ -801,17 +854,9 @@ namespace staff_work_tracking.Controllers
                         "At least one user must be assigned to the monthly goals.");
                 }
 
-                // --------------------------------------------------------
-                // GET USERS
-                // --------------------------------------------------------
-
                 var assignedUsers = await _context.Users
                     .Where(u => allAssignedUserIds.Contains(u.UserId))
                     .ToListAsync();
-
-                // --------------------------------------------------------
-                // CHECK MISSING USERS
-                // --------------------------------------------------------
 
                 var missingUserIds = allAssignedUserIds
                     .Except(assignedUsers.Select(u => u.UserId))
@@ -826,34 +871,45 @@ namespace staff_work_tracking.Controllers
                     });
                 }
 
-                // --------------------------------------------------------
-                // DEPARTMENT VALIDATION
-                // --------------------------------------------------------
+
+                //foreach (var user in assignedUsers)
+                //{
+                //    if (!isDirector && !string.Equals(
+                //            user.Department,
+                //            creator.Department,
+                //            StringComparison.OrdinalIgnoreCase))
+                //    {
+                //        return BadRequest(
+                //            $"User {user.UserId} does not belong to the creator's department.");
+                //    }
+                //}
 
                 foreach (var user in assignedUsers)
                 {
-                    if (!string.Equals(
-                            user.Department,
-                            creator.Department,
-                            StringComparison.OrdinalIgnoreCase))
+                    if (isDirector)
+                        continue;
+
+                    bool sameDepartment = string.Equals(
+                        user.Department?.Trim(),
+                        creator.Department?.Trim(),
+                        StringComparison.OrdinalIgnoreCase);
+
+                    bool belongsToDivision = isDivisionHead &&
+                        !string.IsNullOrWhiteSpace(user.Department) &&
+                        allowedDepartmentNames.Contains(user.Department.Trim());
+
+                    if (!sameDepartment && !belongsToDivision)
                     {
                         return BadRequest(
-                            $"User {user.UserId} does not belong to the creator's department.");
+                            $"User {user.UserId} does not belong to your permitted department.");
                     }
                 }
-
-                // ========================================================
-                // TRANSACTION
-                // ========================================================
 
                 using var transaction =
                     await _context.Database.BeginTransactionAsync();
 
                 try
                 {
-                    // ====================================================
-                    // CREATE YEARLY GOAL
-                    // ====================================================
 
                     var yearlyGoal = new Goal
                     {
@@ -885,6 +941,20 @@ namespace staff_work_tracking.Controllers
                     };
 
                     _context.Goal.Add(yearlyGoal);
+
+                    await _context.SaveChangesAsync();
+                
+
+                    // Assign only the explicitly selected yearly users
+                    var yearlyAssignments = yearlyAssignedUserIds
+                        .Select(userId => new GoalAssignment
+                        {
+                            GoalId = yearlyGoal.Id,
+                            UserId = userId
+                        })
+                        .ToList();
+
+                    _context.GoalAssignment.AddRange(yearlyAssignments);
 
                     await _context.SaveChangesAsync();
 
@@ -931,10 +1001,6 @@ namespace staff_work_tracking.Controllers
 
                         createdMonthlyGoals.Add(monthlyGoal);
 
-                        // ------------------------------------------------
-                        // CREATE ASSIGNMENTS
-                        // ------------------------------------------------
-
                         var uniqueUserIds = monthly.AssignedUserIds
                             .Distinct()
                             .ToList();
@@ -955,12 +1021,70 @@ namespace staff_work_tracking.Controllers
                         nextMonthlyNumber++;
                     }
 
-                    // ====================================================
-                    // COMMIT
-                    // ====================================================
-
                     await transaction.CommitAsync();
 
+
+                    var assignedStaffUsers = await _context.Users
+                        .Where(u =>
+    yearlyAssignedUserIds.Contains(u.UserId) &&
+    !string.IsNullOrWhiteSpace(u.FcmToken))
+                        .ToListAsync();
+
+                    // Notify assigned staff
+                    foreach (var assignedUser in assignedStaffUsers)
+                    {
+                        try
+                        {
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                assignedUser.FcmToken,
+                                "New Goal Assigned",
+                                $"A new goal '{yearlyGoal.Title}' has been created and assigned to you."
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                $"FCM Error ({assignedUser.UserId}): {ex.Message}");
+                        }
+                    }
+
+                    // Notify immediate higher role
+                    if (int.TryParse(creator.Role, out int creatorPosition))
+                    {
+                        var upperRole = await _context.Roles
+                            .Where(r =>
+                                r.Status &&
+                                r.Position < creatorPosition)
+                            .OrderByDescending(r => r.Position)
+                            .FirstOrDefaultAsync();
+
+                        if (upperRole != null)
+                        {
+                            var upperUsers = await _context.Users
+                                .Where(u =>
+                                    u.Department == creator.Department &&
+                                    u.Role == upperRole.Position.ToString() &&
+                                    !string.IsNullOrWhiteSpace(u.FcmToken))
+                                .ToListAsync();
+
+                            foreach (var upperUser in upperUsers)
+                            {
+                                try
+                                {
+                                    await _firebaseNotificationService.SendNotificationAsync(
+                                        upperUser.FcmToken,
+                                        "New Goal Created",
+                                        $"{creator.Name} created the goal '{yearlyGoal.Title}'."
+                                    );
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine(
+                                        $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}");
+                                }
+                            }
+                        }
+                    }
                     // ====================================================
                     // SUCCESS RESPONSE
                     // ====================================================
@@ -1020,15 +1144,10 @@ namespace staff_work_tracking.Controllers
                 }
             }
 
-            // ============================================================
-            // 5. CREATE STANDALONE MONTHLY GOAL
-            // ============================================================
 
             if (goalType.Equals("Monthly", StringComparison.OrdinalIgnoreCase))
             {
-                // --------------------------------------------------------
-                // OPTIONAL QUANTITY
-                // --------------------------------------------------------
+ 
 
                 if (model.TargetQuantity.HasValue &&
                     model.TargetQuantity.Value <= 0)
@@ -1037,20 +1156,12 @@ namespace staff_work_tracking.Controllers
                         "Monthly targetQuantity must be greater than 0 when quantity is provided.");
                 }
 
-                // --------------------------------------------------------
-                // ASSIGNMENT REQUIRED
-                // --------------------------------------------------------
-
                 if (model.AssignedUserIds == null ||
                     model.AssignedUserIds.Count == 0)
                 {
                     return BadRequest(
                         "At least one user must be assigned to the monthly goal.");
                 }
-
-                // --------------------------------------------------------
-                // GET PARENT YEARLY GOAL
-                // --------------------------------------------------------
 
                 Goal? parentGoal = null;
 
@@ -1074,10 +1185,6 @@ namespace staff_work_tracking.Controllers
                         return BadRequest(
                             "A monthly goal can only have a Yearly parent goal.");
                     }
-
-                    // ----------------------------------------------------
-                    // CHECK QUANTITY ONLY IF BOTH HAVE QUANTITY
-                    // ----------------------------------------------------
 
                     if (model.TargetQuantity.HasValue &&
                         parentGoal.TargetQuantity.HasValue)
@@ -1104,10 +1211,6 @@ namespace staff_work_tracking.Controllers
                     }
                 }
 
-                // --------------------------------------------------------
-                // GET ASSIGNED USERS
-                // --------------------------------------------------------
-
                 var assignedUserIds = model.AssignedUserIds
                     .Distinct()
                     .ToList();
@@ -1115,10 +1218,6 @@ namespace staff_work_tracking.Controllers
                 var assignedUsers = await _context.Users
                     .Where(u => assignedUserIds.Contains(u.UserId))
                     .ToListAsync();
-
-                // --------------------------------------------------------
-                // CHECK MISSING USERS
-                // --------------------------------------------------------
 
                 var missingUserIds = assignedUserIds
                     .Except(assignedUsers.Select(u => u.UserId))
@@ -1133,25 +1232,40 @@ namespace staff_work_tracking.Controllers
                     });
                 }
 
-                // --------------------------------------------------------
-                // DEPARTMENT VALIDATION
-                // --------------------------------------------------------
+                //foreach (var user in assignedUsers)
+                //{
+                //    if (!isDirector && !string.Equals(
+                //            user.Department,
+                //            creator.Department,
+                //            StringComparison.OrdinalIgnoreCase))
+                //    {
+                //        return BadRequest(
+                //            $"User {user.UserId} does not belong to the creator's department.");
+                //    }
+                //}
+
 
                 foreach (var user in assignedUsers)
                 {
-                    if (!string.Equals(
-                            user.Department,
-                            creator.Department,
-                            StringComparison.OrdinalIgnoreCase))
+                    if (isDirector)
+                        continue;
+
+                    bool sameDepartment = string.Equals(
+                        user.Department?.Trim(),
+                        creator.Department?.Trim(),
+                        StringComparison.OrdinalIgnoreCase);
+
+                    bool belongsToDivision = isDivisionHead &&
+                        !string.IsNullOrWhiteSpace(user.Department) &&
+                        allowedDepartmentNames.Contains(user.Department.Trim());
+
+                    if (!sameDepartment && !belongsToDivision)
                     {
                         return BadRequest(
-                            $"User {user.UserId} does not belong to the creator's department.");
+                            $"User {user.UserId} does not belong to your permitted department.");
                     }
                 }
 
-                // --------------------------------------------------------
-                // GENERATE MONTHLY CODE
-                // --------------------------------------------------------
 
                 var lastMonthlyGoal = await _context.Goal
                     .Where(g => g.GoalType == "Monthly")
@@ -1172,18 +1286,11 @@ namespace staff_work_tracking.Controllers
                     }
                 }
 
-                // ========================================================
-                // TRANSACTION
-                // ========================================================
-
                 using var monthlyTransaction =
                     await _context.Database.BeginTransactionAsync();
 
                 try
                 {
-                    // ====================================================
-                    // CREATE MONTHLY GOAL
-                    // ====================================================
 
                     var monthlyGoal = new Goal
                     {
@@ -1218,10 +1325,6 @@ namespace staff_work_tracking.Controllers
 
                     await _context.SaveChangesAsync();
 
-                    // ====================================================
-                    // CREATE ASSIGNMENTS
-                    // ====================================================
-
                     foreach (var userId in assignedUserIds)
                     {
                         var assignment = new GoalAssignment
@@ -1235,15 +1338,69 @@ namespace staff_work_tracking.Controllers
 
                     await _context.SaveChangesAsync();
 
-                    // ====================================================
-                    // COMMIT
-                    // ====================================================
-
                     await monthlyTransaction.CommitAsync();
 
-                    // ====================================================
-                    // SUCCESS RESPONSE
-                    // ====================================================
+                    var assignedStaffUsers = await _context.Users
+    .Where(u =>
+        assignedUserIds.Contains(u.UserId) &&
+        !string.IsNullOrWhiteSpace(u.FcmToken))
+    .ToListAsync();
+
+                    // Notify assigned staff
+                    foreach (var assignedUser in assignedStaffUsers)
+                    {
+                        try
+                        {
+                            await _firebaseNotificationService.SendNotificationAsync(
+                                assignedUser.FcmToken,
+                                "New Goal Assigned",
+                                $"A new goal '{monthlyGoal.Title}' has been created and assigned to you."
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(
+                                $"FCM Error ({assignedUser.UserId}): {ex.Message}");
+                        }
+                    }
+
+                    // Notify immediate higher role
+                    if (int.TryParse(creator.Role, out int creatorPosition))
+                    {
+                        var upperRole = await _context.Roles
+                            .Where(r =>
+                                r.Status &&
+                                r.Position < creatorPosition)
+                            .OrderByDescending(r => r.Position)
+                            .FirstOrDefaultAsync();
+
+                        if (upperRole != null)
+                        {
+                            var upperUsers = await _context.Users
+                                .Where(u =>
+                                    u.Department == creator.Department &&
+                                    u.Role == upperRole.Position.ToString() &&
+                                    !string.IsNullOrWhiteSpace(u.FcmToken))
+                                .ToListAsync();
+
+                            foreach (var upperUser in upperUsers)
+                            {
+                                try
+                                {
+                                    await _firebaseNotificationService.SendNotificationAsync(
+                                        upperUser.FcmToken,
+                                        "New Goal Created",
+                                        $"{creator.Name} created the goal '{monthlyGoal.Title}'."
+                                    );
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine(
+                                        $"Upper Position FCM Error ({upperUser.UserId}): {ex.Message}");
+                                }
+                            }
+                        }
+                    }
 
                     return Ok(new
                     {
@@ -1287,10 +1444,6 @@ namespace staff_work_tracking.Controllers
                     });
                 }
             }
-
-            // ============================================================
-            // 6. INVALID GOAL TYPE
-            // ============================================================
 
             return BadRequest(
                 "Invalid GoalType. Allowed values are Yearly or Monthly.");
@@ -2264,9 +2417,6 @@ namespace staff_work_tracking.Controllers
         {
             try
             {
-                // ============================================================
-                // 1. GET LOGGED-IN USER
-                // ============================================================
 
                 var userIdClaim = User.FindFirst("UserId")?.Value;
                 var roleClaim = User.FindFirst("Role")?.Value;
@@ -2277,81 +2427,50 @@ namespace staff_work_tracking.Controllers
                 if (!int.TryParse(roleClaim, out int role))
                     return Unauthorized("Invalid Role.");
 
-                // ============================================================
-                // 2. GET GOALS BASED ON ROLE
-                // ============================================================
-
                 List<Goal> goals;
 
                 if (role == 1) // Director
                 {
-                    // Director can see all goals
                     goals = await _context.Goal
                         .OrderByDescending(g => g.Id)
                         .ToListAsync();
                 }
                 else
                 {
-                    // --------------------------------------------------------
-                    // STEP 1: Get goals directly assigned to logged-in user
-                    // --------------------------------------------------------
-
+                    // STEP 1: Get goals directly assigned to this user
                     var assignedGoalIds = await _context.GoalAssignment
                         .Where(a => a.UserId == userId)
                         .Select(a => a.GoalId)
                         .Distinct()
                         .ToListAsync();
 
-                    // --------------------------------------------------------
-                    // STEP 2: Get those assigned goals
-                    // --------------------------------------------------------
-
-                    var assignedGoals = await _context.Goal
+                    var directlyAssignedGoals = await _context.Goal
                         .Where(g => assignedGoalIds.Contains(g.Id))
                         .ToListAsync();
 
-                    // --------------------------------------------------------
-                    // STEP 3: Find parent yearly goals
-                    // --------------------------------------------------------
-                    //
-                    // If user has:
-                    //
-                    // Monthly MG001
-                    //     ParentGoalId = 10
-                    //
-                    // then also include Goal Id 10.
-                    //
-                    // --------------------------------------------------------
-
-                    var parentGoalIds = assignedGoals
-                        .Where(g => g.ParentGoalId.HasValue)
-                        .Select(g => g.ParentGoalId!.Value)
-                        .Distinct()
+                    // STEP 2: Get yearly goals explicitly assigned to this user
+                    var assignedYearlyGoalIds = directlyAssignedGoals
+                        .Where(g => string.Equals(
+                            g.GoalType, "Yearly",
+                            StringComparison.OrdinalIgnoreCase))
+                        .Select(g => g.Id)
                         .ToList();
 
-                    // --------------------------------------------------------
-                    // STEP 4: Get parent yearly goals
-                    // --------------------------------------------------------
-
-                    var parentGoals = await _context.Goal
-                        .Where(g => parentGoalIds.Contains(g.Id))
+                    // STEP 3: Get ALL monthly goals under those yearly goals
+                    var relatedMonthlyGoals = await _context.Goal
+                        .Where(g =>
+                            g.GoalType == "Monthly" &&
+                            g.ParentGoalId.HasValue &&
+                            assignedYearlyGoalIds.Contains(g.ParentGoalId.Value))
                         .ToListAsync();
 
-                    // --------------------------------------------------------
-                    // STEP 5: Combine assigned goals + parent yearly goals
-                    // --------------------------------------------------------
-
-                    goals = assignedGoals
-                        .Concat(parentGoals)
+                    goals = directlyAssignedGoals
+                        .Concat(relatedMonthlyGoals)
                         .GroupBy(g => g.Id)
                         .Select(g => g.First())
                         .OrderByDescending(g => g.Id)
                         .ToList();
                 }
-
-                // ============================================================
-                // 3. GET GOAL CODES
-                // ============================================================
 
                 var goalCodes = goals
                     .Where(g => !string.IsNullOrWhiteSpace(g.GoalCode))
@@ -2359,17 +2478,9 @@ namespace staff_work_tracking.Controllers
                     .Distinct()
                     .ToList();
 
-                // ============================================================
-                // 4. GET TASKS
-                // ============================================================
-
                 var tasks = await _context.Tasks
                     .Where(t => goalCodes.Contains(t.GoalCode))
                     .ToListAsync();
-
-                // ============================================================
-                // 5. GET TASK MEMBERS
-                // ============================================================
 
                 var taskCodes = tasks
                     .Where(t => !string.IsNullOrWhiteSpace(t.TaskCode))
@@ -2381,16 +2492,8 @@ namespace staff_work_tracking.Controllers
                     .Where(tm => taskCodes.Contains(tm.TaskCode))
                     .ToListAsync();
 
-                // ============================================================
-                // 6. GET USERS
-                // ============================================================
-
                 var users = await _context.Users
                     .ToListAsync();
-
-                // ============================================================
-                // 7. TASK RESPONSE
-                // ============================================================
 
                 object BuildTaskResponse(TaskTable task)
                 {
@@ -2426,21 +2529,6 @@ namespace staff_work_tracking.Controllers
                     };
                 }
 
-                // ============================================================
-                // 8. QUANTITY
-                // ============================================================
-                // IMPORTANT:
-                // Every goal uses its OWN TargetQuantity.
-                //
-                // Yearly:
-                //     TargetQuantity = yearly target
-                //
-                // Monthly:
-                //     TargetQuantity = monthly target
-                //
-                // We do NOT calculate yearly quantity from monthly goals.
-                // ============================================================
-
                 int? GetPendingQuantity(Goal goal)
                 {
                     if (!goal.TargetQuantity.HasValue)
@@ -2454,15 +2542,7 @@ namespace staff_work_tracking.Controllers
                     );
                 }
 
-                // ============================================================
-                // 9. RESULT
-                // ============================================================
-
                 var result = new List<object>();
-
-                // ============================================================
-                // 10. YEARLY GOALS
-                // ============================================================
 
                 var yearlyGoals = goals
                     .Where(g =>
@@ -2474,9 +2554,6 @@ namespace staff_work_tracking.Controllers
 
                 foreach (var yearlyGoal in yearlyGoals)
                 {
-                    // ========================================================
-                    // YEARLY ASSIGNED USERS
-                    // ========================================================
 
                     var yearlyAssignedUserIds = await _context.GoalAssignment
                         .Where(a => a.GoalId == yearlyGoal.Id)
@@ -2494,18 +2571,10 @@ namespace staff_work_tracking.Controllers
                         })
                         .ToList();
 
-                    // ========================================================
-                    // YEARLY TASKS
-                    // ========================================================
-
                     var yearlyTasks = tasks
                         .Where(t => t.GoalCode == yearlyGoal.GoalCode)
                         .Select(BuildTaskResponse)
                         .ToList();
-
-                    // ========================================================
-                    // MONTHLY GOALS UNDER THIS YEAR
-                    // ========================================================
 
                     var monthlyGoals = goals
                         .Where(g =>
@@ -2521,10 +2590,7 @@ namespace staff_work_tracking.Controllers
 
                     foreach (var monthlyGoal in monthlyGoals)
                     {
-                        // ====================================================
-                        // MONTHLY ASSIGNED USERS
-                        // ====================================================
-
+                      
                         var monthlyAssignedUserIds =
                             await _context.GoalAssignment
                                 .Where(a => a.GoalId == monthlyGoal.Id)
@@ -2542,26 +2608,13 @@ namespace staff_work_tracking.Controllers
                             })
                             .ToList();
 
-                        // ====================================================
-                        // MONTHLY CREATOR
-                        // ====================================================
-
                         var monthlyCreator = users
                             .FirstOrDefault(
                                 u => u.UserId == monthlyGoal.CreatedBy);
-
-                        // ====================================================
-                        // MONTHLY TASKS
-                        // ====================================================
-
                         var monthlyTasks = tasks
                             .Where(t => t.GoalCode == monthlyGoal.GoalCode)
                             .Select(BuildTaskResponse)
                             .ToList();
-
-                        // ====================================================
-                        // MONTHLY RESULT
-                        // ====================================================
 
                         monthlyResult.Add(new
                         {
@@ -2583,19 +2636,11 @@ namespace staff_work_tracking.Controllers
 
                             goalpoints = monthlyGoal.Goalpoints,
 
-                            // =================================================
-                            // MONTHLY QUANTITY
-                            // =================================================
-
                             targetQuantity = monthlyGoal.TargetQuantity,
 
                             completedQuantity = monthlyGoal.CompletedQuantity,
 
                             pendingQuantity = GetPendingQuantity(monthlyGoal),
-
-                            // =================================================
-                            // DATES
-                            // =================================================
 
                             startDate = monthlyGoal.StartDate,
 
@@ -2603,24 +2648,12 @@ namespace staff_work_tracking.Controllers
 
                             completedDate = monthlyGoal.Completed_Date,
 
-                            // =================================================
-                            // CREATOR
-                            // =================================================
-
                             createdBy = monthlyGoal.CreatedBy,
 
                             createdByName =
                                 monthlyCreator?.Name ?? "N/A",
 
-                            // =================================================
-                            // USERS
-                            // =================================================
-
                             assignedUsers = monthlyAssignedUsers,
-
-                            // =================================================
-                            // TASKS
-                            // =================================================
 
                             taskCount = monthlyTasks.Count,
 
@@ -2628,18 +2661,9 @@ namespace staff_work_tracking.Controllers
                         });
                     }
 
-                    // ========================================================
-                    // YEARLY CREATOR
-                    // ========================================================
-
                     var yearlyCreator = users
                         .FirstOrDefault(
                             u => u.UserId == yearlyGoal.CreatedBy);
-
-                    // ========================================================
-                    // YEARLY RESULT
-                    // ========================================================
-
                     result.Add(new
                     {
                         id = yearlyGoal.Id,
@@ -2660,26 +2684,11 @@ namespace staff_work_tracking.Controllers
 
                         goalpoints = yearlyGoal.Goalpoints,
 
-                        // =====================================================
-                        // YEARLY QUANTITY
-                        // =====================================================
-                        // This is the value stored directly in the YEARLY goal.
-                        //
-                        // Example:
-                        // Upto 150 machine -> 150
-                        //
-                        // It is NOT calculated from monthly goals.
-                        // =====================================================
-
                         targetQuantity = yearlyGoal.TargetQuantity,
 
                         completedQuantity = yearlyGoal.CompletedQuantity,
 
                         pendingQuantity = GetPendingQuantity(yearlyGoal),
-
-                        // =====================================================
-                        // DATES
-                        // =====================================================
 
                         startDate = yearlyGoal.StartDate,
 
@@ -2687,40 +2696,24 @@ namespace staff_work_tracking.Controllers
 
                         completedDate = yearlyGoal.Completed_Date,
 
-                        // =====================================================
-                        // CREATOR
-                        // =====================================================
-
                         createdBy = yearlyGoal.CreatedBy,
 
                         createdByName =
                             yearlyCreator?.Name ?? "N/A",
 
-                        // =====================================================
-                        // USERS
-                        // =====================================================
-
                         assignedUsers = yearlyAssignedUsers,
-
-                        // =====================================================
-                        // TASKS
-                        // =====================================================
-
                         taskCount = yearlyTasks.Count,
 
                         tasks = yearlyTasks,
-
-                        // =====================================================
-                        // MONTHLY GOALS
-                        // =====================================================
 
                         monthlyGoals = monthlyResult
                     });
                 }
 
-                // ============================================================
-                // 11. STANDALONE MONTHLY GOALS
-                // ============================================================
+
+                var visibleYearlyGoalIds = yearlyGoals
+                    .Select(g => g.Id)
+                    .ToHashSet();
 
                 var standaloneMonthlyGoals = goals
                     .Where(g =>
@@ -2728,15 +2721,15 @@ namespace staff_work_tracking.Controllers
                         g.GoalType.Equals(
                             "Monthly",
                             StringComparison.OrdinalIgnoreCase) &&
-                        g.ParentGoalId == null)
+                        (
+                            g.ParentGoalId == null ||
+                            !visibleYearlyGoalIds.Contains(g.ParentGoalId.Value)
+                        ))
                     .OrderBy(g => g.StartDate)
                     .ToList();
 
                 foreach (var monthlyGoal in standaloneMonthlyGoals)
                 {
-                    // ========================================================
-                    // ASSIGNED USERS
-                    // ========================================================
 
                     var assignedUserIds = await _context.GoalAssignment
                         .Where(a => a.GoalId == monthlyGoal.Id)
@@ -2754,26 +2747,14 @@ namespace staff_work_tracking.Controllers
                         })
                         .ToList();
 
-                    // ========================================================
-                    // CREATOR
-                    // ========================================================
-
                     var creator = users
                         .FirstOrDefault(
                             u => u.UserId == monthlyGoal.CreatedBy);
-
-                    // ========================================================
-                    // TASKS
-                    // ========================================================
 
                     var monthlyTasks = tasks
                         .Where(t => t.GoalCode == monthlyGoal.GoalCode)
                         .Select(BuildTaskResponse)
                         .ToList();
-
-                    // ========================================================
-                    // STANDALONE MONTHLY RESULT
-                    // ========================================================
 
                     result.Add(new
                     {
@@ -2795,19 +2776,11 @@ namespace staff_work_tracking.Controllers
 
                         goalpoints = monthlyGoal.Goalpoints,
 
-                        // =====================================================
-                        // MONTHLY QUANTITY
-                        // =====================================================
-
                         targetQuantity = monthlyGoal.TargetQuantity,
 
                         completedQuantity = monthlyGoal.CompletedQuantity,
 
                         pendingQuantity = GetPendingQuantity(monthlyGoal),
-
-                        // =====================================================
-                        // DATES
-                        // =====================================================
 
                         startDate = monthlyGoal.StartDate,
 
@@ -2815,24 +2788,12 @@ namespace staff_work_tracking.Controllers
 
                         completedDate = monthlyGoal.Completed_Date,
 
-                        // =====================================================
-                        // CREATOR
-                        // =====================================================
-
                         createdBy = monthlyGoal.CreatedBy,
 
                         createdByName =
                             creator?.Name ?? "N/A",
 
-                        // =====================================================
-                        // USERS
-                        // =====================================================
-
                         assignedUsers = assignedUsers,
-
-                        // =====================================================
-                        // TASKS
-                        // =====================================================
 
                         taskCount = monthlyTasks.Count,
 
@@ -2841,10 +2802,6 @@ namespace staff_work_tracking.Controllers
                         monthlyGoals = new List<object>()
                     });
                 }
-
-                // ============================================================
-                // 12. RETURN
-                // ============================================================
 
                 return Ok(result);
             }
@@ -3689,6 +3646,12 @@ namespace staff_work_tracking.Controllers
     task.Quantity,
     dto.Quantity,
     () => task.Quantity = dto.Quantity
+);
+            UpdateField(
+    "PerformanceType",
+    task.PerformanceType,
+    dto.PerformanceType,
+    () => task.PerformanceType = dto.PerformanceType
 );
 
             UpdateField(
