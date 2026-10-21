@@ -1748,7 +1748,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                     managerRole == null)
                 {
                     return BadRequest(
-                        "Director, Division Head, or Manager role is not configured.");
+                        "Director, Operation Head, or Manager role is not configured.");
                 }
 
                 string directorRoleId = directorRole.Position.ToString();
@@ -1765,8 +1765,8 @@ public async Task<IActionResult> UpdateTaskStatus(
 
                 // =====================================================
                 // POSITION 1: DIRECTOR
-                // Division Heads + standalone Managers only.
-                // Exclude Managers under any Division Head.
+                // Operation Heads + standalone Managers only.
+                // Exclude Managers under any Operation Head.
                 // =====================================================
                 if (loggedInRole == directorRoleId)
                 {
@@ -1775,10 +1775,10 @@ public async Task<IActionResult> UpdateTaskStatus(
                         .Select(u => u.UserId)
                         .ToHashSet();
 
-                    // Include Division Heads themselves.
+                    // Include Operation Heads themselves.
                     allowedUserIds.UnionWith(divisionHeadIds);
 
-                    // Departments assigned to any Division Head.
+                    // Departments assigned to any Operation Head.
                     var divisionDepartmentIds = departmentAccess
                         .Where(a =>
                             divisionHeadIds.Contains(a.UserId) &&
@@ -1793,7 +1793,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
                     // Only Managers whose departments are NOT assigned
-                    // to a Division Head.
+                    // to a Operation Head.
                     var standaloneManagers = allUsers.Where(u =>
                         u.Role?.Trim() == managerRoleId &&
                         !string.IsNullOrWhiteSpace(u.Department) &&
@@ -1804,9 +1804,9 @@ public async Task<IActionResult> UpdateTaskStatus(
                 }
 
                 // =====================================================
-                // POSITION 2: DIVISION HEAD
+                // POSITION 2: Operation Head
                 // Users belonging to departments assigned to this
-                // Division Head through DepartmentAccess.
+                // Operation Head through DepartmentAccess.
                 // =====================================================
                 else if (loggedInRole == divisionHeadRoleId)
                 {
@@ -2264,7 +2264,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                                 u.UserId == divisionHeadAccess.UserId &&
                                 u.Role == divisionHeadAccess.RoleId.ToString());
                         if (divisionHead == null)
-                            return BadRequest("Division Head assigned to this department was not found.");
+                            return BadRequest("Operation Head assigned to this department was not found.");
                         receiverId = divisionHead.UserId;
                     }
                     else
@@ -2987,8 +2987,8 @@ public async Task<IActionResult> UpdateTaskStatus(
                 }
 
                 // =====================================================
-                // ROLE 2 = DIVISION HEAD
-                // Division Head -> Director
+                // ROLE 2 = Operation Head
+                // Operation Head -> Director
                 // =====================================================
 
                 if (senderRole == "2")
@@ -3009,15 +3009,15 @@ public async Task<IActionResult> UpdateTaskStatus(
                 else if (senderRole == "3")
                 {
                     // Check whether this manager's department
-                    // is assigned under a Division Head.
+                    // is assigned under a Operation Head.
                     var divisionHeadAccess =
                         await _context.DepartmentAccess
                             .FirstOrDefaultAsync(x =>
                                 x.SubDepartmentId == senderDepartment.Id);
 
                     // -------------------------------------------------
-                    // Manager under Division Head
-                    // -> Division Head
+                    // Manager under Operation Head
+                    // -> Operation Head
                     // -------------------------------------------------
 
                     if (divisionHeadAccess != null)
@@ -3030,7 +3030,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                         if (divisionHead == null)
                         {
                             return BadRequest(
-                                "Division Head assigned to this department was not found."
+                                "Operation Head assigned to this department was not found."
                             );
                         }
 
@@ -3038,7 +3038,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                     }
 
                     // -------------------------------------------------
-                    // Manager not under Division Head
+                    // Manager not under Operation Head
                     // -> Director
                     // -------------------------------------------------
 
@@ -4064,7 +4064,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                 // ============================================================
                 // ROLE 1 - DIRECTOR
                 // Director can see:
-                //     Division Heads (Role 2)
+                //     Operation Heads (Role 2)
                 //     Managers      (Role 3)
                 // ============================================================
                 if (role == "1")
@@ -4080,7 +4080,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                 }
 
                 // ============================================================
-                // ROLE 2 - DIVISION HEAD
+                // ROLE 2 - Operation Head
                 // Get departments from DepartmentAccess
                 // using SubDepartmentId
                 //
@@ -4160,7 +4160,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                 //
                 // Excludes:
                 //     Director
-                //     Division Head
+                //     Operation Head
                 //     Manager
                 // ============================================================
                 else if (role == "3")
@@ -4230,6 +4230,11 @@ public async Task<IActionResult> UpdateTaskStatus(
                 // ============================================================
                 // 4. Return response
                 // ============================================================
+                var roleName = await _context.Roles
+    .AsNoTracking()
+    .Where(r => r.Position.ToString() == loggedInUser.Role)
+    .Select(r => r.RoleName)
+    .FirstOrDefaultAsync();
                 return Ok(new
                 {
                     requestedBy = new
@@ -4240,11 +4245,7 @@ public async Task<IActionResult> UpdateTaskStatus(
                         department = loggedInUser.Department
                     },
 
-                    accessLevel = role == "1"
-                        ? "Director"
-                        : role == "2"
-                            ? "Division Head - DepartmentAccess"
-                            : "Manager - Own Department Staff",
+                    accessLevel = roleName,
 
                     usersCount = usersToShow.Count,
 
@@ -5224,109 +5225,56 @@ public async Task<IActionResult> UpdateTaskStatus(
             if (completedDate == null)
                 return 0;
 
-            // =====================================================
-            // 1. EXISTING TIME SCORE
-            // =====================================================
-
             int timeScore;
 
-            if (startDate.Date == dueDate.Date &&
-                completedDate.Value.Date == dueDate.Date)
+            // 1. TIME SCORE
+            if (endTime.HasValue)
             {
-                if (endTime.HasValue)
+                DateTime dueDateTime = dueDate.Date.Add(endTime.Value);
+                TimeSpan difference = completedDate.Value - dueDateTime;
+
+                if (difference < TimeSpan.Zero)
                 {
-                    DateTime dueDateTime =
-                        dueDate.Date.Add(endTime.Value);
-
-                    TimeSpan difference =
-                        completedDate.Value - dueDateTime;
-
-                    if (difference < TimeSpan.Zero)
-                    {
-                        // Completed before EndTime
-                        timeScore = 90;
-                    }
-                    else if (difference == TimeSpan.Zero)
-                    {
-                        // Completed exactly at EndTime
-                        timeScore = 85;
-                    }
-                    else
-                    {
-                        // Completed after EndTime
-                        int lateHours =
-                            (int)Math.Ceiling(difference.TotalHours);
-
-                        timeScore = 85 - (lateHours * 5);
-
-                        timeScore = Math.Max(timeScore, 50);
-                    }
+                    timeScore = 100; // Completed before EndTime
+                }
+                else if (difference == TimeSpan.Zero)
+                {
+                    timeScore = 95; // Completed exactly at EndTime
                 }
                 else
                 {
-                    // Same day and no EndTime
-                    timeScore = 90;
+                    int lateHours = (int)Math.Ceiling(difference.TotalHours);
+
+                    timeScore = 95 - (lateHours * 5);
+                    timeScore = Math.Max(timeScore, 50);
                 }
             }
             else
             {
-                if (endTime.HasValue)
-                {
-                    DateTime dueDateTime =
-                        dueDate.Date.Add(endTime.Value);
+                int lateDays =
+                    (completedDate.Value.Date - dueDate.Date).Days;
 
-                    TimeSpan difference =
-                        completedDate.Value - dueDateTime;
-
-                    if (difference < TimeSpan.Zero)
-                    {
-                        timeScore = 90;
-                    }
-                    else if (difference == TimeSpan.Zero)
-                    {
-                        timeScore = 85;
-                    }
-                    else
-                    {
-                        int lateHours =
-                            (int)Math.Ceiling(difference.TotalHours);
-
-                        timeScore = 85 - (lateHours * 5);
-
-                        timeScore = Math.Max(timeScore, 50);
-                    }
-                }
+                if (lateDays < 0)
+                    timeScore = 100;
+                else if (lateDays == 0)
+                    timeScore = 95;
+                else if (lateDays == 1)
+                    timeScore = 90;
+                else if (lateDays == 2)
+                    timeScore = 85;
+                else if (lateDays == 3)
+                    timeScore = 80;
+                else if (lateDays == 4)
+                    timeScore = 75;
+                else if (lateDays == 5)
+                    timeScore = 70;
+                else if (lateDays == 6)
+                    timeScore = 65;
                 else
-                {
-                    int lateDays =
-                        (completedDate.Value.Date - dueDate.Date).Days;
-
-                    if (lateDays < 0)
-                        timeScore = 90;
-                    else if (lateDays == 0)
-                        timeScore = 85;
-                    else if (lateDays == 1)
-                        timeScore = 80;
-                    else if (lateDays == 2)
-                        timeScore = 75;
-                    else if (lateDays == 3)
-                        timeScore = 70;
-                    else if (lateDays == 4)
-                        timeScore = 65;
-                    else if (lateDays == 5)
-                        timeScore = 60;
-                    else if (lateDays == 6)
-                        timeScore = 55;
-                    else
-                        timeScore = 50;
-                }
+                    timeScore = 50;
             }
 
-
-            // =====================================================
             // 2. PRIORITY BONUS
-            // =====================================================
-
             int priorityBonus = 0;
 
             switch (priority?.ToLower())
@@ -5340,85 +5288,37 @@ public async Task<IActionResult> UpdateTaskStatus(
                     break;
             }
 
+            // 3. NORMAL TASK SCORE (MAXIMUM 100)
+            int normalScore = timeScore + priorityBonus;
+            normalScore = Math.Clamp(normalScore, 50, 100);
 
-            // =====================================================
-            // 3. NORMAL TASK SCORE
-            // =====================================================
-
-            int normalScore =
-                timeScore + priorityBonus;
-
-            // Maximum system points = 90
-            normalScore =
-                Math.Clamp(normalScore, 50, 90);
-
-
-            // =====================================================
-            // 4. QUANTITY CALCULATION
-            // =====================================================
-
-            // No quantity task
+            // 4. NO QUANTITY TASK
             if (!targetQuantity.HasValue)
-            {
                 return normalScore;
-            }
 
-
-            // Quantity task but completed quantity not available
+            // 5. QUANTITY TASK WITHOUT COMPLETED QUANTITY
             if (!completedQuantity.HasValue)
-            {
                 return 0;
-            }
-
 
             int target = targetQuantity.Value;
-            int completed = completedQuantity.Value;
+            int completed = Math.Max(completedQuantity.Value, 0);
 
-
-            // Prevent invalid values
             if (target <= 0)
-            {
                 return normalScore;
-            }
 
-            if (completed < 0)
-            {
-                completed = 0;
-            }
-
-
-            // =====================================================
-            // 5. COMPLETED >= TARGET
-            // =====================================================
-
+            // 6. TARGET ACHIEVED
             if (completed >= target)
-            {
                 return normalScore;
-            }
 
+            // 7. PARTIAL QUANTITY SCORE
+            double quantityPercentage = (double)completed / target;
 
-            // =====================================================
-            // 6. PARTIAL QUANTITY
-            // =====================================================
+            int quantityScore = (int)Math.Round(
+                normalScore * quantityPercentage,
+                MidpointRounding.AwayFromZero);
 
-            double quantityPercentage =
-                (double)completed / target;
-
-
-            // Reduce normal score according to completion %
-            int quantityScore =
-                (int)Math.Round(
-                    normalScore * quantityPercentage,
-                    MidpointRounding.AwayFromZero);
-
-
-            // =====================================================
-            // 7. RETURN QUANTITY-ADJUSTED SCORE
-            // =====================================================
-
-            return Math.Clamp(quantityScore, 0, 90);
+            return Math.Clamp(quantityScore, 0, 100);
         }
-
         private int CalculateGoalPoints( List<int> taskAveragePoints,string goalPriority,DateTime? dueDate)
         {
             if (taskAveragePoints == null ||

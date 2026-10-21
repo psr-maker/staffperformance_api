@@ -174,9 +174,9 @@ namespace staff.Controllers
                         ||
 
                         // -----------------------------------------
-                        // MANAGER (ROLE 3)
+                        // MANAGER (ROLE 3) 
                         // Send to Manager (3)
-                        // AND Division Head (2)
+                        // AND Operation Head (2)
                         // -----------------------------------------
                         (
                             targetRole == "3"
@@ -1091,7 +1091,7 @@ namespace staff.Controllers
                 }
                 else if (roleClaim == "2")
                 {
-                    // Get departments accessible to this Division Head.
+                    // Get departments accessible to this Operation Head.
                     var departmentAccess = await _context.DepartmentAccess
                         .Where(x =>
                             x.UserId == loggedInUserId &&
