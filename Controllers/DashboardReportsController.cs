@@ -409,12 +409,14 @@ namespace staff.Controllers
             var overdueTasks = pendingTasks
                 .Count(t => t.Due_Date.Date < today);
 
-            var taskOnTime = completedTasks.Count(t =>
-                t.Completed_Date != default &&
+            var completedTasksWithDates = completedTasks
+      .Where(t => t.Completed_Date.Year > 1)
+      .ToList();
+
+            var taskOnTime = completedTasksWithDates.Count(t =>
                 t.Completed_Date.Date <= t.Due_Date.Date);
 
-            var taskDelayed = completedTasks.Count(t =>
-                t.Completed_Date != default &&
+            var taskDelayed = completedTasksWithDates.Count(t =>
                 t.Completed_Date.Date > t.Due_Date.Date);
 
             // =====================================================
@@ -437,8 +439,10 @@ namespace staff.Controllers
                 .Count(g => g.DueDate.Date < today);
 
             var goalsWithCompletionDate = completedGoals
-                .Where(g => g.Completed_Date.HasValue)
-                .ToList();
+     .Where(g =>
+         g.Completed_Date.HasValue &&
+         g.Completed_Date.Value.Year > 1)
+     .ToList();
 
             var goalOnTime = goalsWithCompletionDate.Count(g =>
                 g.Completed_Date!.Value.Date <= g.DueDate.Date);
@@ -629,16 +633,20 @@ namespace staff.Controllers
                     });
                 }
 
+                var deptTasksWithDates = deptCompletedTasks
+    .Where(t => t.Completed_Date.Year > 1)
+    .ToList();
+
                 var deptGoalsWithDates = deptCompletedGoals
-                    .Where(g => g.Completed_Date.HasValue)
+                    .Where(g =>
+                        g.Completed_Date.HasValue &&
+                        g.Completed_Date.Value.Year > 1)
                     .ToList();
 
-                var deptTaskOnTime = deptCompletedTasks.Count(t =>
-                    t.Completed_Date != default &&
+                var deptTaskOnTime = deptTasksWithDates.Count(t =>
                     t.Completed_Date.Date <= t.Due_Date.Date);
 
-                var deptTaskDelayed = deptCompletedTasks.Count(t =>
-                    t.Completed_Date != default &&
+                var deptTaskDelayed = deptTasksWithDates.Count(t =>
                     t.Completed_Date.Date > t.Due_Date.Date);
 
                 var deptGoalOnTime = deptGoalsWithDates.Count(g =>
@@ -646,7 +654,6 @@ namespace staff.Controllers
 
                 var deptGoalDelayed = deptGoalsWithDates.Count(g =>
                     g.Completed_Date!.Value.Date > g.DueDate.Date);
-
                 departmentResults.Add(new
                 {
                     department = departmentName,
@@ -1003,252 +1010,252 @@ namespace staff.Controllers
         }
 
 
-        [HttpGet("Manager-dashboard/{departmentName}")]
-        public async Task<IActionResult> GetDepartmentSummary(string departmentName, DateTime? fromDate, DateTime? toDate)
-        {
-            try
-            {
-                var today = DateTime.Today;
+    //    [HttpGet("Manager-dashboard/{departmentName}")]
+    //    public async Task<IActionResult> GetDepartmentSummary(string departmentName, DateTime? fromDate, DateTime? toDate)
+    //    {
+    //        try
+    //        {
+    //            var today = DateTime.Today;
 
-                // 1️⃣ Get Department Users
-                var departmentUsers = await _context.Users
-                    .Where(u => u.Department == departmentName)
-                    .Select(u => new
-                    {
-                        Id = u.UserId.ToString(),
-                        u.Name
-                    })
-                    .ToListAsync();
+    //            // 1️⃣ Get Department Users
+    //            var departmentUsers = await _context.Users
+    //                .Where(u => u.Department == departmentName)
+    //                .Select(u => new
+    //                {
+    //                    Id = u.UserId.ToString(),
+    //                    u.Name
+    //                })
+    //                .ToListAsync();
 
-                if (!departmentUsers.Any())
-                {
-                    return Ok(new
-                    {
-                        Department = departmentName,
-                        UserCount = 0,
-                        Message = "No users found in this department"
-                    });
-                }
+    //            if (!departmentUsers.Any())
+    //            {
+    //                return Ok(new
+    //                {
+    //                    Department = departmentName,
+    //                    UserCount = 0,
+    //                    Message = "No users found in this department"
+    //                });
+    //            }
 
-                var userIds = departmentUsers.Select(u => u.Id).ToList();
+    //            var userIds = departmentUsers.Select(u => u.Id).ToList();
 
-                // 2️⃣ Get Department Task Codes
-                var departmentTaskCodes = await _context.TaskMembers
-                    .Where(tm => userIds.Contains(
-                        tm.Assign_To.Substring(0, tm.Assign_To.IndexOf("-"))
-                    ))
-                    .Select(tm => tm.TaskCode)
-                    .Distinct()
-                    .ToListAsync();
+    //            // 2️⃣ Get Department Task Codes
+    //            var departmentTaskCodes = await _context.TaskMembers
+    //                .Where(tm => userIds.Contains(
+    //                    tm.Assign_To.Substring(0, tm.Assign_To.IndexOf("-"))
+    //                ))
+    //                .Select(tm => tm.TaskCode)
+    //                .Distinct()
+    //                .ToListAsync();
 
-                // 3️⃣ Base Task Query
-                var taskQuery = _context.Tasks
-                    .Where(t => departmentTaskCodes.Contains(t.TaskCode));
+    //            // 3️⃣ Base Task Query
+    //            var taskQuery = _context.Tasks
+    //                .Where(t => departmentTaskCodes.Contains(t.TaskCode));
 
-                // Date Filter
-                if (fromDate.HasValue && toDate.HasValue)
-                {
-                    var start = fromDate.Value.Date;
-                    var end = toDate.Value.Date.AddDays(1).AddTicks(-1);
+    //            // Date Filter
+    //            if (fromDate.HasValue && toDate.HasValue)
+    //            {
+    //                var start = fromDate.Value.Date;
+    //                var end = toDate.Value.Date.AddDays(1).AddTicks(-1);
 
-                    taskQuery = taskQuery
-                        .Where(t => t.Created_At >= start && t.Created_At <= end);
-                }
+    //                taskQuery = taskQuery
+    //                    .Where(t => t.Created_At >= start && t.Created_At <= end);
+    //            }
 
-                var taskList = await taskQuery.ToListAsync();
-                var totalTasks = taskList.Count;
+    //            var taskList = await taskQuery.ToListAsync();
+    //            var totalTasks = taskList.Count;
 
-                // 4️⃣ Normalize Status
-                var normalizedTasks = taskList.Select(t => new
-                {
-                    Task = t,
-                    Status = t.Status?.Trim().ToLower() ?? ""
-                }).ToList();
+    //            // 4️⃣ Normalize Status
+    //            var normalizedTasks = taskList.Select(t => new
+    //            {
+    //                Task = t,
+    //                Status = t.Status?.Trim().ToLower() ?? ""
+    //            }).ToList();
 
-                int completed = normalizedTasks.Count(t => t.Status == "completed");
-                int notStarted = normalizedTasks.Count(t => t.Status == "not started");
-                int inProgress = normalizedTasks.Count(t => t.Status == "inprogress");
-                int pending = normalizedTasks.Count(t =>
-                    t.Status == "pending" || t.Status == "paused");
+    //            int completed = normalizedTasks.Count(t => t.Status == "completed");
+    //            int notStarted = normalizedTasks.Count(t => t.Status == "not started");
+    //            int inProgress = normalizedTasks.Count(t => t.Status == "inprogress");
+    //            int pending = normalizedTasks.Count(t =>
+    //                t.Status == "pending" || t.Status == "paused");
 
-                // 5️⃣ Overdue Tasks (Single Logic)
-                var overdueTasks = normalizedTasks
-                    .Where(t =>
-                        t.Task.Due_Date < today &&
-                        t.Status != "completed")
-                    .ToList();
+    //            // 5️⃣ Overdue Tasks (Single Logic)
+    //            var overdueTasks = normalizedTasks
+    //                .Where(t =>
+    //                    t.Task.Due_Date < today &&
+    //                    t.Status != "completed")
+    //                .ToList();
 
-                int overdue = overdueTasks.Count;
+    //            int overdue = overdueTasks.Count;
 
-                int lateCompleted = normalizedTasks.Count(t =>
-                    t.Status == "completed" &&
-                    t.Task.Completed_Date != null &&
-                    t.Task.Completed_Date > t.Task.Due_Date);
+    //            int lateCompleted = normalizedTasks.Count(t =>
+    //                t.Status == "completed" &&
+    //                t.Task.Completed_Date != null &&
+    //                t.Task.Completed_Date > t.Task.Due_Date);
 
-                // 6️⃣ Completion %
-                double completionPercentage =
-                    totalTasks > 0
-                        ? Math.Round((double)completed * 100 / totalTasks, 2)
-                        : 0;
+    //            // 6️⃣ Completion %
+    //            double completionPercentage =
+    //                totalTasks > 0
+    //                    ? Math.Round((double)completed * 100 / totalTasks, 2)
+    //                    : 0;
 
-                // 7️⃣ SLA %
-                int onTimeCompleted = normalizedTasks.Count(t =>
-                    t.Status == "completed" &&
-                    t.Task.Completed_Date != null &&
-                    t.Task.Completed_Date <= t.Task.Due_Date);
+    //            // 7️⃣ SLA %
+    //            int onTimeCompleted = normalizedTasks.Count(t =>
+    //                t.Status == "completed" &&
+    //                t.Task.Completed_Date != null &&
+    //                t.Task.Completed_Date <= t.Task.Due_Date);
 
-                double slaPercentage =
-                    completed > 0
-                        ? Math.Round((double)onTimeCompleted * 100 / completed, 2)
-                        : 0;
+    //            double slaPercentage =
+    //                completed > 0
+    //                    ? Math.Round((double)onTimeCompleted * 100 / completed, 2)
+    //                    : 0;
 
-                // 8️⃣ Average Completion Days (Safe)
-                var validCompletedTasks = normalizedTasks
-                    .Where(t =>
-                        t.Status == "completed" &&
-                        t.Task.Completed_Date != null &&
-                        t.Task.Completed_Date >= t.Task.Created_At)
-                    .Select(t =>
-                        (t.Task.Completed_Date - t.Task.Created_At).TotalDays)
-                    .ToList();
+    //            // 8️⃣ Average Completion Days (Safe)
+    //            var validCompletedTasks = normalizedTasks
+    //                .Where(t =>
+    //                    t.Status == "completed" &&
+    //                    t.Task.Completed_Date != null &&
+    //                    t.Task.Completed_Date >= t.Task.Created_At)
+    //                .Select(t =>
+    //                    (t.Task.Completed_Date - t.Task.Created_At).TotalDays)
+    //                .ToList();
 
-                double avgCompletionDays =
-                    validCompletedTasks.Any()
-                        ? Math.Round(validCompletedTasks.Average(), 2)
-                        : 0;
+    //            double avgCompletionDays =
+    //                validCompletedTasks.Any()
+    //                    ? Math.Round(validCompletedTasks.Average(), 2)
+    //                    : 0;
 
-                // 9️⃣ Monthly Trend (Last 6 Months)
-                var trendStart = DateTime.Today.AddMonths(-5);
+    //            // 9️⃣ Monthly Trend (Last 6 Months)
+    //            var trendStart = DateTime.Today.AddMonths(-5);
 
-                var monthlyTrend = normalizedTasks
-                    .Where(t => t.Task.Created_At >= trendStart)
-                    .GroupBy(t => new
-                    {
-                        t.Task.Created_At.Year,
-                        t.Task.Created_At.Month
-                    })
-                    .Select(g => new
-                    {
-                        g.Key.Year,
-                        g.Key.Month,
-                        Total = g.Count(),
-                        Completed = g.Count(x => x.Status == "completed"),
-                        Overdue = g.Count(x =>
-                            x.Task.Due_Date < today &&
-                            x.Status != "completed")
-                    })
-                    .OrderBy(x => x.Year)
-                    .ThenBy(x => x.Month)
-                    .ToList();
+    //            var monthlyTrend = normalizedTasks
+    //                .Where(t => t.Task.Created_At >= trendStart)
+    //                .GroupBy(t => new
+    //                {
+    //                    t.Task.Created_At.Year,
+    //                    t.Task.Created_At.Month
+    //                })
+    //                .Select(g => new
+    //                {
+    //                    g.Key.Year,
+    //                    g.Key.Month,
+    //                    Total = g.Count(),
+    //                    Completed = g.Count(x => x.Status == "completed"),
+    //                    Overdue = g.Count(x =>
+    //                        x.Task.Due_Date < today &&
+    //                        x.Status != "completed")
+    //                })
+    //                .OrderBy(x => x.Year)
+    //                .ThenBy(x => x.Month)
+    //                .ToList();
 
-                // 🔟 Growth %
-                double growth = 0;
+    //            // 🔟 Growth %
+    //            double growth = 0;
 
-                if (monthlyTrend.Count >= 2)
-                {
-                    var last = monthlyTrend.Last().Total;
-                    var previous = monthlyTrend[monthlyTrend.Count - 2].Total;
+    //            if (monthlyTrend.Count >= 2)
+    //            {
+    //                var last = monthlyTrend.Last().Total;
+    //                var previous = monthlyTrend[monthlyTrend.Count - 2].Total;
 
-                    if (previous > 0)
-                        growth = Math.Round(((double)(last - previous) / previous) * 100, 2);
-                }
+    //                if (previous > 0)
+    //                    growth = Math.Round(((double)(last - previous) / previous) * 100, 2);
+    //            }
 
-                // 1️⃣1️⃣ Overdue Task List
-                var overdueTaskList = overdueTasks
-                    .OrderBy(t => t.Task.Due_Date)
-                    .Select(t => new
-                    {
-                        t.Task.TaskCode,
-                        t.Task.Task,
-                        Description = t.Task.Description ?? "",
-                        Priority = t.Task.Priority ?? "",
-                        Status = t.Task.Status ?? "",
-                        CreatedAt = t.Task.Created_At,
-                        DueDate = t.Task.Due_Date,
-                        TotalMembers = t.Task.Members,
-                        //AssignedTo = _context.TaskMembers
-                        //    .Where(tm => tm.TaskCode == t.Task.TaskCode)
-                        //    .Select(tm => tm.Assign_To)
-                        //    .ToList()
+    //            // 1️⃣1️⃣ Overdue Task List
+    //            var overdueTaskList = overdueTasks
+    //                .OrderBy(t => t.Task.Due_Date)
+    //                .Select(t => new
+    //                {
+    //                    t.Task.TaskCode,
+    //                    t.Task.Task,
+    //                    Description = t.Task.Description ?? "",
+    //                    Priority = t.Task.Priority ?? "",
+    //                    Status = t.Task.Status ?? "",
+    //                    CreatedAt = t.Task.Created_At,
+    //                    DueDate = t.Task.Due_Date,
+    //                    TotalMembers = t.Task.Members,
+    //                    //AssignedTo = _context.TaskMembers
+    //                    //    .Where(tm => tm.TaskCode == t.Task.TaskCode)
+    //                    //    .Select(tm => tm.Assign_To)
+    //                    //    .ToList()
 
-                        AssignedTo = _context.TaskMembers
-    .Where(tm => tm.TaskCode == t.Task.TaskCode)
-    .Select(tm => new
-    {
-        userId = tm.Assign_To,
-        role = _context.Users
-            .Where(u =>
-                u.UserId.ToString() ==
-                (tm.Assign_To.Contains("-")
-                    ? tm.Assign_To.Substring(0, tm.Assign_To.IndexOf("-"))
-                    : tm.Assign_To)
-            )
-            .Select(u => u.Role)
-            .FirstOrDefault()
-    })
-    .ToList()
-                    })
-                    .ToList();
+    //                    AssignedTo = _context.TaskMembers
+    //.Where(tm => tm.TaskCode == t.Task.TaskCode)
+    //.Select(tm => new
+    //{
+    //    userId = tm.Assign_To,
+    //    role = _context.Users
+    //        .Where(u =>
+    //            u.UserId.ToString() ==
+    //            (tm.Assign_To.Contains("-")
+    //                ? tm.Assign_To.Substring(0, tm.Assign_To.IndexOf("-"))
+    //                : tm.Assign_To)
+    //        )
+    //        .Select(u => u.Role)
+    //        .FirstOrDefault()
+    //})
+    //.ToList()
+    //                })
+    //                .ToList();
 
-                // 1️⃣2️⃣ Performer Analysis (All Department Users Included)
-                var performerStats = departmentUsers
-                    .Select(u => new
-                    {
-                        User = u.Name,
-                        TotalTasks = _context.TaskMembers
-                            .Count(tm =>
-                                departmentTaskCodes.Contains(tm.TaskCode) &&
-                                tm.Assign_To.StartsWith(u.Id)),
-                        Completed = _context.TaskMembers
-                            .Join(_context.Tasks,
-                                tm => tm.TaskCode,
-                                t => t.TaskCode,
-                                (tm, t) => new { tm, t })
-                            .Count(x =>
-                                x.t.Status.ToLower() == "completed" &&
-                                x.tm.Assign_To.StartsWith(u.Id))
-                    })
-                    .ToList();
+    //            // 1️⃣2️⃣ Performer Analysis (All Department Users Included)
+    //            var performerStats = departmentUsers
+    //                .Select(u => new
+    //                {
+    //                    User = u.Name,
+    //                    TotalTasks = _context.TaskMembers
+    //                        .Count(tm =>
+    //                            departmentTaskCodes.Contains(tm.TaskCode) &&
+    //                            tm.Assign_To.StartsWith(u.Id)),
+    //                    Completed = _context.TaskMembers
+    //                        .Join(_context.Tasks,
+    //                            tm => tm.TaskCode,
+    //                            t => t.TaskCode,
+    //                            (tm, t) => new { tm, t })
+    //                        .Count(x =>
+    //                            x.t.Status.ToLower() == "completed" &&
+    //                            x.tm.Assign_To.StartsWith(u.Id))
+    //                })
+    //                .ToList();
 
-                var topPerformer = performerStats
-                    .OrderByDescending(x => x.Completed)
-                    .FirstOrDefault();
+    //            var topPerformer = performerStats
+    //                .OrderByDescending(x => x.Completed)
+    //                .FirstOrDefault();
 
-                var lowPerformer = performerStats
-                    .OrderBy(x => x.Completed)
-                    .FirstOrDefault();
+    //            var lowPerformer = performerStats
+    //                .OrderBy(x => x.Completed)
+    //                .FirstOrDefault();
 
-                // 🔹 Final Response
-                return Ok(new
-                {
-                    Department = departmentName,
-                    UserCount = departmentUsers.Count,
-                    TotalTasks = totalTasks,
-                    Completed = completed,
-                    NotStarted = notStarted,
-                    InProgress = inProgress,
-                    Pending = pending,
-                    Overdue = overdue,
-                    LateCompleted = lateCompleted,
-                    CompletionPercentage = completionPercentage,
-                    SLAPercentage = slaPercentage,
-                    AverageCompletionDays = avgCompletionDays,
-                    GrowthPercentage = growth,
-                    MonthlyTrend = monthlyTrend,
-                    OverdueTaskList = overdueTaskList,
-                    TopPerformer = topPerformer,
-                    LowPerformer = lowPerformer
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new
-                {
-                    message = "Error fetching department summary",
-                    error = ex.Message
-                });
-            }
-        }
+    //            // 🔹 Final Response
+    //            return Ok(new
+    //            {
+    //                Department = departmentName,
+    //                UserCount = departmentUsers.Count,
+    //                TotalTasks = totalTasks,
+    //                Completed = completed,
+    //                NotStarted = notStarted,
+    //                InProgress = inProgress,
+    //                Pending = pending,
+    //                Overdue = overdue,
+    //                LateCompleted = lateCompleted,
+    //                CompletionPercentage = completionPercentage,
+    //                SLAPercentage = slaPercentage,
+    //                AverageCompletionDays = avgCompletionDays,
+    //                GrowthPercentage = growth,
+    //                MonthlyTrend = monthlyTrend,
+    //                OverdueTaskList = overdueTaskList,
+    //                TopPerformer = topPerformer,
+    //                LowPerformer = lowPerformer
+    //            });
+    //        }
+    //        catch (Exception ex)
+    //        {
+    //            return StatusCode(500, new
+    //            {
+    //                message = "Error fetching department summary",
+    //                error = ex.Message
+    //            });
+    //        }
+    //    }
 
         [HttpGet("punch-corrections")]
         public async Task<IActionResult> GetPunchCorrections(int managerId)

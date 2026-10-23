@@ -218,35 +218,31 @@ namespace staff.Controllers
                 // 10. ON-TIME AND DELAYED GOALS
                 // ============================================================
 
-                int onTimeGoals = goals.Count(g =>
-                    string.Equals(
-                        g.Status,
-                        "Completed",
-                        StringComparison.OrdinalIgnoreCase) &&
-                    g.Completed_Date.HasValue &&
-                    g.Completed_Date.Value <= g.DueDate);
-
-                double onTimeGoalCompletionPercentage = completedGoals > 0
-                    ? Math.Round((double)onTimeGoals * 100 / completedGoals, 2)
-                    : 0;
-
                 var completedGoalsList = goals
                     .Where(g =>
                         string.Equals(
                             g.Status,
                             "Completed",
                             StringComparison.OrdinalIgnoreCase) &&
-                        g.Completed_Date.HasValue)
+                        g.Completed_Date.HasValue &&
+                        g.Completed_Date.Value.Year > 1)
                     .ToList();
 
+                int onTimeGoals = completedGoalsList.Count(g =>
+                    g.Completed_Date!.Value.Date <= g.DueDate.Date);
+
                 int delayedGoals = completedGoalsList.Count(g =>
-                    g.Completed_Date!.Value > g.DueDate);
+                    g.Completed_Date!.Value.Date > g.DueDate.Date);
+
+                double onTimeGoalCompletionPercentage = completedGoals > 0
+                    ? Math.Round(
+                        (double)onTimeGoals * 100 / completedGoals, 2)
+                    : 0;
 
                 double delayedGoalPercentage = completedGoalsList.Count > 0
                     ? Math.Round(
                         (double)delayedGoals * 100 / completedGoalsList.Count, 2)
                     : 0;
-
                 // ============================================================
                 // 11. TASK COUNTS
                 // ============================================================
@@ -280,38 +276,30 @@ namespace staff.Controllers
                 // 12. ON-TIME AND DELAYED TASKS
                 // ============================================================
 
-
-                int onTimeTasks = tasks.Count(t =>
-                    string.Equals(
-                        t.Status,
-                        "Completed",
-                        StringComparison.OrdinalIgnoreCase) &&
-                    t.Completed_Date <= t.Due_Date);
-
-
-                double onTimeTaskCompletionPercentage = completedTasks > 0
-                    ? Math.Round((double)onTimeTasks * 100 / completedTasks, 2)
-                    : 0;
-
-
                 var completedTasksList = tasks
                     .Where(t =>
                         string.Equals(
                             t.Status,
                             "Completed",
-                            StringComparison.OrdinalIgnoreCase))
+                            StringComparison.OrdinalIgnoreCase) &&
+                        t.Completed_Date.Year > 1)
                     .ToList();
 
+                int onTimeTasks = completedTasksList.Count(t =>
+                    t.Completed_Date.Date <= t.Due_Date.Date);
+
                 int delayedTasks = completedTasksList.Count(t =>
-                    t.Completed_Date > t.Due_Date);
+                    t.Completed_Date.Date > t.Due_Date.Date);
+
+                double onTimeTaskCompletionPercentage = completedTasks > 0
+                    ? Math.Round(
+                        (double)onTimeTasks * 100 / completedTasks, 2)
+                    : 0;
 
                 double delayedTaskPercentage = completedTasksList.Count > 0
                     ? Math.Round(
                         (double)delayedTasks * 100 / completedTasksList.Count, 2)
                     : 0;
-
-             
-
                 // ============================================================
                 // 13. OVERDUE GOALS LIST
                 // ============================================================
@@ -1043,31 +1031,30 @@ namespace staff.Controllers
 
                 // Completed tasks with a valid completion date
                 var completedTasksWithDate = allTasks
-                    .Where(t =>
-                        IsCompleted(t.Status) &&
-                        t.Completed_Date != default(DateTime))
-                    .ToList();
+     .Where(t =>
+         IsCompleted(t.Status) &&
+         HasCalendarDate(t.Completed_Date))
+     .ToList();
 
+                // Compare India calendar dates
                 int onTimeTasks = completedTasksWithDate.Count(t =>
-                    t.Completed_Date <= t.Due_Date);
+                    !IsDelayed(t.Completed_Date!, t.Due_Date));
 
                 int delayedTasks = completedTasksWithDate.Count(t =>
-                    t.Completed_Date > t.Due_Date);
+                    IsDelayed(t.Completed_Date!, t.Due_Date));
 
-                double taskOnTimePercent =
-                    completedTasksWithDate.Count == 0
-                        ? 0
-                        : Math.Round(
-                            onTimeTasks * 100.0 /
-                            completedTasksWithDate.Count, 2);
+                // Percentages based on completed tasks with valid dates
+                int completedTasksWithValidDate = completedTasksWithDate.Count;
 
-                double delayedTaskPercent =
-                    completedTasksWithDate.Count == 0
-                        ? 0
-                        : Math.Round(
-                            delayedTasks * 100.0 /
-                            completedTasksWithDate.Count, 2);
+                double taskOnTimePercent = completedTasksWithValidDate == 0
+                    ? 0
+                    : Math.Round(
+                        onTimeTasks * 100.0 / completedTasksWithValidDate, 2);
 
+                double delayedTaskPercent = completedTasksWithValidDate == 0
+                    ? 0
+                    : Math.Round(
+                        delayedTasks * 100.0 / completedTasksWithValidDate, 2);
                 // =========================================================
                 // 9. GOAL SUMMARY
                 // =========================================================
@@ -1092,29 +1079,29 @@ namespace staff.Controllers
                 var completedGoalsWithDate = goals
                     .Where(g =>
                         IsCompleted(g.Status) &&
-                        g.Completed_Date != default(DateTime))
+                        g.Completed_Date.HasValue &&
+                        HasCalendarDate(g.Completed_Date.Value))
                     .ToList();
 
+                // Compare India calendar dates
                 int onTimeGoals = completedGoalsWithDate.Count(g =>
-                    g.Completed_Date <= g.DueDate);
+                    !IsDelayed(g.Completed_Date!.Value, g.DueDate));
 
                 int delayedGoalsCount = completedGoalsWithDate.Count(g =>
-                    g.Completed_Date > g.DueDate);
+                    IsDelayed(g.Completed_Date!.Value, g.DueDate));
 
-                double goalOnTimePercent =
-                    completedGoalsWithDate.Count == 0
-                        ? 0
-                        : Math.Round(
-                            onTimeGoals * 100.0 /
-                            completedGoalsWithDate.Count, 2);
+                // Percentages based on completed goals with valid dates
+                int completedGoalsWithValidDate = completedGoalsWithDate.Count;
 
-                double delayedGoalPercent =
-                    completedGoalsWithDate.Count == 0
-                        ? 0
-                        : Math.Round(
-                            delayedGoalsCount * 100.0 /
-                            completedGoalsWithDate.Count, 2);
+                double goalOnTimePercent = completedGoalsWithValidDate == 0
+                    ? 0
+                    : Math.Round(
+                        onTimeGoals * 100.0 / completedGoalsWithValidDate, 2);
 
+                double delayedGoalPercent = completedGoalsWithValidDate == 0
+                    ? 0
+                    : Math.Round(
+                        delayedGoalsCount * 100.0 / completedGoalsWithValidDate, 2);
                 // =========================================================
                 // 10. YEARLY AND MONTHLY PRODUCTIVITY / PERFORMANCE
                 // =========================================================
@@ -1979,6 +1966,41 @@ namespace staff.Controllers
             }
         }
 
+
+
+        private static readonly TimeZoneInfo IndiaTime =
+    TimeZoneInfo.FindSystemTimeZoneById(
+        OperatingSystem.IsWindows()
+            ? "India Standard Time"
+            : "Asia/Kolkata");
+
+        private static bool HasCalendarDate(DateTime value)
+        {
+            return value.Year > 1;
+        }
+
+        private static DateTime IndiaDate(DateTime value)
+        {
+            DateTime utc = value.Kind switch
+            {
+                DateTimeKind.Utc => value,
+                DateTimeKind.Local => value.ToUniversalTime(),
+                DateTimeKind.Unspecified =>
+                    DateTime.SpecifyKind(value, DateTimeKind.Utc),
+                _ => value
+            };
+
+            return TimeZoneInfo
+                .ConvertTimeFromUtc(utc, IndiaTime)
+                .Date;
+        }
+
+        private static bool IsDelayed(DateTime completed, DateTime due)
+        {
+            return HasCalendarDate(completed) &&
+                   HasCalendarDate(due) &&
+                   IndiaDate(completed) > IndiaDate(due);
+        }
 
     }
 }
