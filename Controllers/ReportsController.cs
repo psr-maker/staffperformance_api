@@ -1995,11 +1995,23 @@ namespace staff.Controllers
                 .Date;
         }
 
+
         private static bool IsDelayed(DateTime completed, DateTime due)
         {
-            return HasCalendarDate(completed) &&
-                   HasCalendarDate(due) &&
-                   IndiaDate(completed) > IndiaDate(due);
+            if (!HasCalendarDate(completed) ||
+                !HasCalendarDate(due))
+            {
+                return false;
+            }
+
+            // Same saved calendar day is on time.
+            if (completed.Date <= due.Date)
+            {
+                return false;
+            }
+
+            // Delayed only if the India calendar day is also later.
+            return IndiaDate(completed) > IndiaDate(due);
         }
 
     }
