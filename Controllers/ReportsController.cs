@@ -137,17 +137,28 @@ namespace staff.Controllers
                 // 5. DATE FILTER
                 // ============================================================
 
+
+                DateTime rangeStart = fromDate?.Date ?? DateTime.MinValue;
+
+                DateTime rangeEnd = toDate.HasValue
+                    ? toDate.Value.Date.AddDays(1)
+                    : DateTime.MaxValue;
+
+                if (fromDate.HasValue && toDate.HasValue &&
+                    fromDate.Value.Date > toDate.Value.Date)
+                {
+                    return BadRequest(new
+                    {
+                        message = "From date cannot be after To date."
+                    });
+                }
+
                 if (fromDate.HasValue || toDate.HasValue)
                 {
-                    DateTime? startDate = fromDate?.Date;
-                    DateTime? endDate = toDate?.Date;
-
                     goals = goals
                         .Where(g =>
-                            (!startDate.HasValue ||
-                             g.StartDate.Date >= startDate.Value) &&
-                            (!endDate.HasValue ||
-                             g.StartDate.Date <= endDate.Value))
+                            g.StartDate < rangeEnd &&
+                            g.DueDate >= rangeStart)
                         .ToList();
                 }
 
@@ -175,6 +186,7 @@ namespace staff.Controllers
                 // 8. TASK MEMBERS
                 // ============================================================
 
+
                 var taskCodes = tasks
                     .Where(t => !string.IsNullOrWhiteSpace(t.TaskCode))
                     .Select(t => t.TaskCode)
@@ -184,6 +196,34 @@ namespace staff.Controllers
                 var taskMembers = await _context.TaskMembers
                     .Where(tm => taskCodes.Contains(tm.TaskCode))
                     .ToListAsync();
+
+                // Keep tasks assigned to users in this department.
+                var departmentPrefixes = departmentUserIds
+                    .Select(id => id + "-")
+                    .ToList();
+
+                var departmentTaskCodes = taskMembers
+                    .Where(tm =>
+                        tm.Assign_To != null &&
+                        departmentPrefixes.Any(prefix =>
+                            tm.Assign_To.StartsWith(prefix)))
+                    .Select(tm => tm.TaskCode)
+                    .ToHashSet();
+
+                tasks = tasks
+                    .Where(t => departmentTaskCodes.Contains(t.TaskCode))
+                    .ToList();
+
+                // Apply the selected dates to tasks.
+                if (fromDate.HasValue || toDate.HasValue)
+                {
+                    tasks = tasks
+                        .Where(t =>
+                            t.Created_At >= rangeStart &&
+                            t.Created_At < rangeEnd)
+                        .ToList();
+                }
+
 
                 // ============================================================
                 // 9. GOAL COUNTS
@@ -218,6 +258,7 @@ namespace staff.Controllers
                 // 10. ON-TIME AND DELAYED GOALS
                 // ============================================================
 
+
                 var completedGoalsList = goals
                     .Where(g =>
                         string.Equals(
@@ -225,24 +266,26 @@ namespace staff.Controllers
                             "Completed",
                             StringComparison.OrdinalIgnoreCase) &&
                         g.Completed_Date.HasValue &&
-                        g.Completed_Date.Value.Year > 1)
+                        HasCalendarDate(g.Completed_Date.Value) &&
+                        HasCalendarDate(g.DueDate))
                     .ToList();
 
                 int onTimeGoals = completedGoalsList.Count(g =>
-                    g.Completed_Date!.Value.Date <= g.DueDate.Date);
+                    !IsDelayed(g.Completed_Date!.Value, g.DueDate));
 
                 int delayedGoals = completedGoalsList.Count(g =>
-                    g.Completed_Date!.Value.Date > g.DueDate.Date);
+                    IsDelayed(g.Completed_Date!.Value, g.DueDate));
 
-                double onTimeGoalCompletionPercentage = completedGoals > 0
-                    ? Math.Round(
-                        (double)onTimeGoals * 100 / completedGoals, 2)
-                    : 0;
+                int timedGoals = completedGoalsList.Count;
 
-                double delayedGoalPercentage = completedGoalsList.Count > 0
-                    ? Math.Round(
-                        (double)delayedGoals * 100 / completedGoalsList.Count, 2)
-                    : 0;
+                double onTimeGoalCompletionPercentage = timedGoals == 0
+                    ? 0
+                    : Math.Round(onTimeGoals * 100.0 / timedGoals, 2);
+
+                double delayedGoalPercentage = timedGoals == 0
+                    ? 0
+                    : Math.Round(delayedGoals * 100.0 / timedGoals, 2);
+
                 // ============================================================
                 // 11. TASK COUNTS
                 // ============================================================
@@ -276,30 +319,33 @@ namespace staff.Controllers
                 // 12. ON-TIME AND DELAYED TASKS
                 // ============================================================
 
+
                 var completedTasksList = tasks
                     .Where(t =>
                         string.Equals(
                             t.Status,
                             "Completed",
                             StringComparison.OrdinalIgnoreCase) &&
-                        t.Completed_Date.Year > 1)
+                        HasCalendarDate(t.Completed_Date) &&
+                        HasCalendarDate(t.Due_Date))
                     .ToList();
 
                 int onTimeTasks = completedTasksList.Count(t =>
-                    t.Completed_Date.Date <= t.Due_Date.Date);
+                    !IsDelayed(t.Completed_Date, t.Due_Date));
 
                 int delayedTasks = completedTasksList.Count(t =>
-                    t.Completed_Date.Date > t.Due_Date.Date);
+                    IsDelayed(t.Completed_Date, t.Due_Date));
 
-                double onTimeTaskCompletionPercentage = completedTasks > 0
-                    ? Math.Round(
-                        (double)onTimeTasks * 100 / completedTasks, 2)
-                    : 0;
+                int timedTasks = completedTasksList.Count;
 
-                double delayedTaskPercentage = completedTasksList.Count > 0
-                    ? Math.Round(
-                        (double)delayedTasks * 100 / completedTasksList.Count, 2)
-                    : 0;
+                double onTimeTaskCompletionPercentage = timedTasks == 0
+                    ? 0
+                    : Math.Round(onTimeTasks * 100.0 / timedTasks, 2);
+
+                double delayedTaskPercentage = timedTasks == 0
+                    ? 0
+                    : Math.Round(delayedTasks * 100.0 / timedTasks, 2);
+
                 // ============================================================
                 // 13. OVERDUE GOALS LIST
                 // ============================================================
@@ -2013,6 +2059,10 @@ namespace staff.Controllers
             // Delayed only if the India calendar day is also later.
             return IndiaDate(completed) > IndiaDate(due);
         }
+
+
+        //***********************************************************************
+
 
     }
 }
